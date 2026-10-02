@@ -4,7 +4,7 @@ async function call(m,p,b){const r=await fetch("/relay/"+p,{method:m,headers:{"c
 const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||"Request failed ("+r.status+")");return j}
 async function load(){try{const j=await call("GET","space/archive");const a=Array.isArray(j)?j:(j.recordings||j.items||[])
 const ul=$("#list");ul.textContent="";if(!a.length){ul.innerHTML="<li>No recordings yet. Paste a Space link above.</li>";return}
-for(const r of a){const li=document.createElement("li");li.append(r.title||r.id);const b=document.createElement("button");b.className="d";b.textContent="Delete"
+for(const r of a){const li=document.createElement("li");const label=r.title||r.name||r.id;li.append(label);const b=document.createElement("button");b.className="d";b.textContent="Delete"
 b.onclick=async()=>{if(!confirm("Delete this recording?"))return;try{await call("DELETE","space/archive/"+encodeURIComponent(r.id));load()}catch(e){msg(e.message)}};li.append(b);ul.append(li)}}catch(e){msg(e.message)}}
-$("#f").onsubmit=async e=>{e.preventDefault();try{msg("Starting…");await call("POST","space/start",{url:$("#u").value});msg("Recording started.");load()}catch(x){msg(x.message)}}
+$("#f").onsubmit=async e=>{e.preventDefault();try{msg("Starting…");await call("POST","space/monitor",{input:$("#u").value});msg("Monitor started — will record when the Space is live.");load()}catch(x){msg(x.message)}}
 load()

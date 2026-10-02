@@ -10,11 +10,15 @@ app.disable('x-powered-by')
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-relay-key, x-relay-user')
   if (req.method === 'OPTIONS') return res.sendStatus(204)
   next()
 })
 app.use(express.json({ limit: '2mb' }))
+
+// Relay guard: require x-relay-key for non-loopback traffic (Telegram Mini App via Vercel).
+// Loopback (local bot / local UI) continues to work without the key.
+app.use('/api', require('./relay-guard'))
 
 const routesDir = path.join(__dirname, 'routes')
 for (const file of fs.readdirSync(routesDir).sort()) {

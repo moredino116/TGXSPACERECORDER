@@ -18,10 +18,11 @@ function verifyInitData(initData, botToken, allowedIds, maxAgeSec = 3600, now = 
   if (!allow.length || !allow.includes(String(user.id))) return null
   return user
 }
+// Allowed relay paths — must match backend/routes/space.js
 const RULES = [
   ['GET', /^space\/(archive|clips|jobs|status)(\/[\w-]+)?$/],
   ['GET', /^space\/monitor\/[\w-]+$/],
-  ['POST', /^space\/(start|download|monitor)$/],
+  ['POST', /^space\/(download|monitor|resolve)$/],
   ['POST', /^space\/stop\/[\w-]+$/],
   ['POST', /^space\/monitor\/[\w-]+\/cancel$/],
   ['DELETE', /^space\/(archive|clips)\/[\w-]+$/],
