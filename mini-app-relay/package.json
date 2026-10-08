@@ -1,0 +1,10 @@
+{
+  "name": "x-space-recorder-mini-app",
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "test": "node --test test/verify.test.js test/handlers.test.js"
+  }
+}

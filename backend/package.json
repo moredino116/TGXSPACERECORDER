@@ -4,7 +4,7 @@
   "scripts": {
     "dev": "node scripts/check-env.js node --watch server.js",
     "start": "node server.js",
-    "test": "node --test test/db.test.js test/telegram-bot.test.js",
+    "test": "node --test test/db.test.js test/telegram-bot.test.js test/verify-relay.test.js test/relay.test.js test/public-host.test.js",
     "bot": "node telegram-bot.js"
   },
   "dependencies": {

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Recorder</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="./mini-app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div>
+        <p class="eyebrow">X Space Recorder</p>
+        <h1>Open Recorder</h1>
+      </div>
+      <p id="who" class="who"></p>
+    </header>
+    <p id="notice" class="notice" hidden></p>
+    <section id="gate" class="card" hidden>
+      <h2>Open this from Telegram</h2>
+      <p>Use the Open Recorder button on @EmpMfer_bot. A normal browser tab cannot authorize this page.</p>
+    </section>
+    <main id="app" hidden>
+      <form id="record-form" class="card">
+        <label for="space-input">Space link or ID</label>
+        <input id="space-input" name="input" autocomplete="off" placeholder="https://x.com/i/spaces/…" required />
+        <div class="actions">
+          <button type="submit">Record</button>
+          <button type="button" id="watch" class="secondary">Watch for it</button>
+        </div>
+      </form>
+      <section id="live" class="stack"></section>
+      <section class="card">
+        <div class="section-head">
+          <h2>Archive</h2>
+          <button type="button" id="refresh" class="secondary">Refresh</button>
+        </div>
+        <div id="archive" class="stack"></div>
+      </section>
+      <section class="card">
+        <h2>Clips</h2>
+        <div id="clips" class="stack"></div>
+      </section>
+    </main>
+    <script src="./mini-app.js"></script>
+  </body>
+</html>

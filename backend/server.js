@@ -1,7 +1,11 @@
+const { loadEnv } = require('./lib/load-env')
+loadEnv()
+
 const fs = require('fs')
 const path = require('path')
 const express = require('express')
 const { migrate } = require('./lib/db')
+const { publicHostGuard } = require('./lib/public-host')
 
 migrate()
 
@@ -15,6 +19,7 @@ app.use((req, res, next) => {
   next()
 })
 app.use(express.json({ limit: '2mb' }))
+app.use(publicHostGuard)
 
 const routesDir = path.join(__dirname, 'routes')
 for (const file of fs.readdirSync(routesDir).sort()) {
@@ -38,7 +43,7 @@ if (fs.existsSync(clientDir)) {
 }
 
 const port = Number(process.env.BACKEND_PORT || process.env.PORT || 3001)
-const host = process.env.HOST || '0.0.0.0'
+const host = process.env.HOST || '127.0.0.1'
 app.listen(port, host, () => {
   console.log(`[server] listening on http://127.0.0.1:${port}`)
 })
