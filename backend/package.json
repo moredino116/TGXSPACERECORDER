@@ -1,6 +1,9 @@
 {
   "name": "backend",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "node scripts/check-env.js node --watch server.js",
     "start": "node server.js",
