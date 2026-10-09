@@ -42,7 +42,13 @@ Put the token and numeric user ID in `backend/.env`. That file is gitignored.
 powershell -ExecutionPolicy Bypass -File scripts\windows\keep-alive.ps1
 ```
 
-The script starts the recorder API, opens a Cloudflare quick tunnel, and starts the bot with the tunnel's public `https://` URL. If the API, tunnel, or bot exits, all three restart together. The current URL is written to `backend/data/public-url.txt`. `cloudflared` must be on PATH. This is the process that keeps the bot running. A webhook connector cannot do that.
+By default the script starts the recorder API, opens a temporary Cloudflare quick tunnel, and starts the bot with that public `https://` URL. If the API or the bot exits, they restart together. In quick mode a tunnel exit restarts them too. The current URL is written to `backend/data/public-url.txt`. `cloudflared` must be on PATH.
+
+A quick tunnel hostname changes. The Vercel Mini App needs a stable hostname instead. After `cloudflared tunnel create`, set `CLOUDFLARE_TUNNEL_NAME` and a stable `https://` `TELEGRAM_PUBLIC_BASE_URL` in `backend/.env`. The script then runs that named tunnel and keeps the hostname. If cloudflared is already installed as a Windows service, set `CLOUDFLARE_TUNNEL_EXTERNAL=1` so the script starts only the API and the bot.
+
+The Mini App itself lives in `mini-app/` and is the piece that deploys to Vercel. It calls the recorder through `ORACLE_ORIGIN` with `RECORDER_RELAY_KEY`. Those values stay in the Vercel project and in `backend/.env`. Do not commit them.
+
+This script is the process that keeps the bot running. A webhook connector cannot do that.
 
 ## Commands
 

@@ -1,0 +1,9 @@
+# Copy to %USERPROFILE%\.cloudflared\config.yml after `cloudflared tunnel create`.
+# Replace the tunnel id, the credentials path, and the hostname.
+tunnel: YOUR-TUNNEL-ID
+credentials-file: C:\Users\YOUR_WINDOWS_USER\.cloudflared\YOUR-TUNNEL-ID.json
+
+ingress:
+  - hostname: recorder.example.com
+    service: http://localhost:3001
+  - service: http_status:404

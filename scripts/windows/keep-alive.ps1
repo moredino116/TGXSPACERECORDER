@@ -1,6 +1,15 @@
-# Starts the recorder API, a Cloudflare quick tunnel, and the Telegram bot.
-# If any of the three stops, all three are restarted. A new tunnel URL means
-# the bot must restart so its buttons point at the address the phone can open.
+# Starts the recorder API and the Telegram bot, then keeps them running.
+# If either stops, both are restarted. The tunnel mode comes from backend\.env:
+#
+#   quick (default)
+#     Opens a temporary trycloudflare.com URL. Useful for a phone check.
+#     Do not point the Vercel Mini App at it.
+#   named
+#     Set CLOUDFLARE_TUNNEL_NAME and a stable https TELEGRAM_PUBLIC_BASE_URL.
+#     This script runs `cloudflared tunnel run` and keeps that hostname.
+#   external
+#     Set CLOUDFLARE_TUNNEL_EXTERNAL=1 when cloudflared is already a Windows
+#     service. This script starts only the API and the bot.
 #
 # Required in backend\.env (that file is not committed):
 #   TELEGRAM_BOT_TOKEN=...
@@ -84,6 +93,19 @@ function Wait-ForUrl([string]$ErrFile, [System.Diagnostics.Process]$Proc, [int]$
   return $null
 }
 
+function Tunnel-Mode {
+  $base = [string]$env:TELEGRAM_PUBLIC_BASE_URL
+  $stable = $base -and ($base -notmatch 'trycloudflare\.com') -and ($base -match '^https://')
+  if ($env:CLOUDFLARE_TUNNEL_EXTERNAL -eq '1') {
+    if (-not $stable) {
+      throw 'CLOUDFLARE_TUNNEL_EXTERNAL=1 needs TELEGRAM_PUBLIC_BASE_URL set to the stable https hostname.'
+    }
+    return 'external'
+  }
+  if ($env:CLOUDFLARE_TUNNEL_NAME -and $stable) { return 'named' }
+  return 'quick'
+}
+
 function Wait-ForPort([int]$Port, [System.Diagnostics.Process]$Proc, [int]$Seconds) {
   $deadline = (Get-Date).AddSeconds($Seconds)
   while ((Get-Date) -lt $deadline) {
@@ -121,22 +143,39 @@ try {
     }
     Write-Log ("Recorder API is listening on port {0}." -f $env:BACKEND_PORT)
 
-    $tunnel = Start-LoggedProcess 'cloudflared' @('tunnel', '--url', "http://127.0.0.1:$($env:BACKEND_PORT)", '--no-autoupdate') $tunOut $tunErr
-    $publicUrl = Wait-ForUrl $tunErr $tunnel 40
-    if (-not $publicUrl) { $publicUrl = Wait-ForUrl $tunOut $tunnel 5 }
-    if (-not $publicUrl) {
-      Write-Log 'Cloudflare did not publish a public URL. Retrying in 5 seconds.'
-      Start-Sleep -Seconds 5
-      continue
+    $mode = Tunnel-Mode
+    $tunnel = $null
+    if ($mode -eq 'external') {
+      Set-Content -Path (Join-Path $DataDir 'public-url.txt') -Value $env:TELEGRAM_PUBLIC_BASE_URL
+      Write-Log 'Stable recorder URL is set. Cloudflare Tunnel is managed outside this script.'
+    } elseif ($mode -eq 'named') {
+      $tunnel = Start-LoggedProcess 'cloudflared' @('tunnel', 'run', $env:CLOUDFLARE_TUNNEL_NAME) $tunOut $tunErr
+      Start-Sleep -Seconds 3
+      if ($tunnel.HasExited) {
+        Write-Log 'Named Cloudflare Tunnel exited. Retrying in 5 seconds.'
+        Start-Sleep -Seconds 5
+        continue
+      }
+      Set-Content -Path (Join-Path $DataDir 'public-url.txt') -Value $env:TELEGRAM_PUBLIC_BASE_URL
+      Write-Log ("Named tunnel {0} is running." -f $env:CLOUDFLARE_TUNNEL_NAME)
+    } else {
+      $tunnel = Start-LoggedProcess 'cloudflared' @('tunnel', '--url', "http://127.0.0.1:$($env:BACKEND_PORT)", '--no-autoupdate') $tunOut $tunErr
+      $publicUrl = Wait-ForUrl $tunErr $tunnel 40
+      if (-not $publicUrl) { $publicUrl = Wait-ForUrl $tunOut $tunnel 5 }
+      if (-not $publicUrl) {
+        Write-Log 'Cloudflare did not publish a public URL. Retrying in 5 seconds.'
+        Start-Sleep -Seconds 5
+        continue
+      }
+      Set-Content -Path (Join-Path $DataDir 'public-url.txt') -Value $publicUrl
+      $env:TELEGRAM_PUBLIC_BASE_URL = $publicUrl
+      Write-Log ("Public URL is {0}" -f $publicUrl)
     }
-    Set-Content -Path (Join-Path $DataDir 'public-url.txt') -Value $publicUrl
-    $env:TELEGRAM_PUBLIC_BASE_URL = $publicUrl
-    Write-Log ("Public URL is {0}" -f $publicUrl)
 
     $bot = Start-LoggedProcess 'node' @('telegram-bot.js') $botOut $botErr
     Write-Log 'Telegram bot process started.'
 
-    while (-not $api.HasExited -and -not $tunnel.HasExited -and -not $bot.HasExited) {
+    while (-not $api.HasExited -and -not $bot.HasExited -and ($null -eq $tunnel -or -not $tunnel.HasExited)) {
       Start-Sleep -Seconds 2
     }
     Write-Log 'A process exited. Restarting the API, tunnel, and bot together.'
