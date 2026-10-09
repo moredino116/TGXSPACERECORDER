@@ -1,1 +1,1 @@
-{"name":"mferempbot-mini-app","private":true,"type":"commonjs","scripts":{"test":"node --test test/"}}
+{"name":"mferempbot-mini-app","private":true,"type":"commonjs","scripts":{"test":"node --test test/verify.test.js"}}
