@@ -1,0 +1,6 @@
+
+# Local patch backups and private environment files
+**/*.bak
+**/*.before-*
+.env
+.env.*

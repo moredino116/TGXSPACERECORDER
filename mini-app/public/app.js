@@ -1,3 +1,5 @@
+// Dashboard-only entry v1
+if (!new URLSearchParams(location.search).has('manage')) {
 const tg=window.Telegram&&Telegram.WebApp;tg&&(tg.ready(),tg.expand())
 const $=s=>document.querySelector(s),msg=t=>$("#msg").textContent=t
 async function call(m,p,b){const r=await fetch("/relay/"+p,{method:m,headers:{"content-type":"application/json","x-telegram-init-data":tg?tg.initData:""},body:b?JSON.stringify(b):undefined})
@@ -8,3 +10,5 @@ for(const r of a){const li=document.createElement("li");const label=r.title||r.n
 b.onclick=async()=>{if(!confirm("Delete this recording?"))return;try{await call("DELETE","space/archive/"+encodeURIComponent(r.id));load()}catch(e){msg(e.message)}};li.append(b);ul.append(li)}}catch(e){msg(e.message)}}
 $("#f").onsubmit=async e=>{e.preventDefault();try{msg("Starting…");await call("POST","space/monitor",{input:$("#u").value});msg("Monitor started — will record when the Space is live.");load()}catch(x){msg(x.message)}}
 load()
+
+}

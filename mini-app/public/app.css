@@ -5,3 +5,9 @@ input{width:100%;min-height:44px;padding:8px 12px;margin:8px 0;border-radius:8px
 button{min-height:44px;padding:0 16px;border-radius:8px;background:var(--ac);color:#fff;font-weight:600;border:0}
 button.d{background:transparent;color:inherit;border:1px solid #8886;margin-left:8px}
 ul{list-style:none;padding:0}li{padding:12px 0;border-bottom:1px solid #8883}
+
+.manage-controls{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+.manage-controls button{flex:1}
+button:disabled{opacity:.45;cursor:not-allowed}
+audio{width:100%}
+label{display:block;margin-top:12px}

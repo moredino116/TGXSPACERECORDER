@@ -10,3 +10,17 @@ test("rejects tampered",()=>assert.equal(verifyInitData(sign({id:42},now/1000).r
 test("rejects expired",()=>assert.equal(verifyInitData(sign({id:42},now/1000-9999),TOK,"42",3600,now),null))
 test("rejects empty allowlist",()=>assert.equal(verifyInitData(sign({id:42},now/1000),TOK,"",3600,now),null))
 test("allowlist",()=>{assert(allowed("POST","space/stop/abc"));assert(!allowed("GET","x-connections"));assert(!allowed("GET","space/../x"));assert(!allowed("DELETE","space/stop/a"))})
+
+test("direct-item management permissions stay narrow", () => {
+  assert(allowed("GET", "space/process"))
+  assert(allowed("POST", "space/recordings/live_1/archive"))
+  assert(allowed("POST", "retention/items/clip/clip_1/archive"))
+  assert(!allowed("DELETE", "space/process"))
+  assert(!allowed("GET", "space/recordings/live_1/archive"))
+  assert(!allowed("POST", "retention/items/account/a/archive"))
+  assert(!allowed("POST", "retention/items/clip/a/restore"))
+  assert(!allowed("GET", "space/preview/live_1"))
+  assert(!allowed("GET", "space/file/live_1"))
+  assert(!allowed("POST", "space/recordings/a/archive/extra"))
+  assert(!allowed("POST", "space/recordings/../archive"))
+})
