@@ -171,8 +171,8 @@
       event.preventDefault()
       if (rendering) return
       const a = parse(start.value), b = parse(end.value)
-      if (a === null || b === null || b - a < 1 || b - a > 14400) {
-        result.textContent = 'Enter a valid range from 1 second to 4 hours.'
+      if (a === null || b === null || b - a < 1) {
+        result.textContent = 'Enter a valid range of at least 1 second, within the source recording.'
         return
       }
       rendering = true
@@ -185,6 +185,40 @@
         })
         if (!/^[A-Za-z0-9_-]{1,100}$/.test(data.id || '')) {
           throw new Error('No valid clip ID returned.')
+        }
+        let state = data.status
+        let misses = 0
+        while (state !== 'completed') {
+          if (state === 'failed') {
+            throw new Error('Rendering failed. Check the clip library before retrying.')
+          }
+          if (!['queued', 'rendering'].includes(state)) {
+            throw new Error('Unexpected clip status. Check /clips before retrying.')
+          }
+          result.textContent = state === 'queued'
+            ? 'Clip queued. Waiting for the renderer…'
+            : 'Rendering clip… You may leave this page; the job continues.'
+          await new Promise(resolve => setTimeout(resolve, 2500))
+          if (!document.documentElement.contains(form)) return
+          let clips
+          try {
+            clips = await call('GET', `space/recordings/${item}/clips`)
+            misses = 0
+          } catch (pollError) {
+            misses += 1
+            if (misses >= 3) {
+              throw new Error('Status connection lost. The job may still be running; check /clips.')
+            }
+            continue
+          }
+          if (!Array.isArray(clips)) {
+            throw new Error('Invalid status response. Check /clips.')
+          }
+          const current = clips.find(clip => clip.id === data.id)
+          if (!current) {
+            throw new Error('Clip is no longer in this collection. Check /restore or /clips.')
+          }
+          state = current.status
         }
         result.textContent = 'Clip created. '
         const link = document.createElement('a')

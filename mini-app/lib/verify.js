@@ -20,6 +20,8 @@ function verifyInitData(initData, botToken, allowedIds, maxAgeSec = 3600, now = 
 }
 // Allowed relay paths — must match backend/routes/space.js
 const RULES = [
+  // Clip-status polling permission v1
+  ['GET', /^space\/recordings\/[A-Za-z0-9_-]{1,100}\/clips$/],
   // Direct-item management relay permissions v1
   ['GET', /^space\/process$/],
   ['POST', /^space\/recordings\/[A-Za-z0-9_-]{1,100}\/archive$/],

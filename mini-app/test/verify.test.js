@@ -24,3 +24,19 @@ test("direct-item management permissions stay narrow", () => {
   assert(!allowed("POST", "space/recordings/a/archive/extra"))
   assert(!allowed("POST", "space/recordings/../archive"))
 })
+
+
+test("clip-status polling permissions stay narrow", () => {
+  assert(allowed("GET", "space/recordings/rec_123/clips"))
+  assert(allowed("GET", "space/recordings/a-b/clips"))
+  assert(allowed("GET", "space/recordings/" + "a".repeat(100) + "/clips"))
+
+  assert(!allowed("DELETE", "space/recordings/rec_123/clips"))
+  assert(!allowed("PUT", "space/recordings/rec_123/clips"))
+  assert(!allowed("GET", "space/recordings//clips"))
+  assert(!allowed("GET", "space/recordings/../clips"))
+  assert(!allowed("GET", "space/recordings/" + "a".repeat(101) + "/clips"))
+  assert(!allowed("GET", "space/recordings/rec_123/clips/extra"))
+  assert(!allowed("GET", "space/recordings/rec_123/clips?extra=1"))
+  assert(!allowed("GET", "space/recordings/rec_123/file"))
+})
