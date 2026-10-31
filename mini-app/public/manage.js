@@ -10,9 +10,14 @@
   tg?.expand()
 
   main.replaceChildren()
+  main.classList.add('manage-view', 'mfer')
+
+  const header = document.createElement('div')
+  header.className = 'manage-heading'
+  main.append(header)
   const heading = document.createElement('h1')
   heading.textContent = kind === 'clip' ? 'Manage clip' : 'Manage recording'
-  main.append(heading)
+  header.append(heading)
   const status = document.createElement('p')
   status.setAttribute('role', 'status')
   main.append(status)
@@ -46,10 +51,11 @@
   const content = document.createElement('section')
   main.append(content)
 
-  function button(text, handler, parent = content) {
+  function button(text, handler, parent = content, tone = 'neutral') {
     const node = document.createElement('button')
     node.type = 'button'
     node.textContent = text
+    node.setAttribute('data-tone', tone)
     node.onclick = handler
     parent.append(node)
     return node
@@ -64,15 +70,32 @@
 
   const audio = document.createElement('audio')
   audio.preload = 'metadata'
+  audio.paused = true
   content.append(audio)
   const controls = document.createElement('div')
   controls.className = 'manage-controls'
+  // Preferred player layout: playback controls precede seek/time.
   content.append(controls)
 
+  let previewEnd = null
+  let previewResult = null
+
+  function stopPreview(message) {
+    if (previewEnd !== null) {
+      previewEnd = null
+      audio.pause()
+    }
+    if (message) status.textContent = message
+  }
+
   function seek(value) {
+    stopPreview('Preview ended; full-item playback controls are active.')
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+      status.textContent = 'The duration is not available yet.'
+      return
+    }
     try {
-      audio.currentTime = Math.max(0, Number.isFinite(audio.duration)
-        ? Math.min(value, audio.duration) : value)
+      audio.currentTime = Math.max(0, Math.min(value, audio.duration))
     } catch {
       status.textContent = 'That position is not available yet.'
     }
@@ -80,12 +103,13 @@
   button('Forward 30 sec', () => seek(audio.currentTime + 30), controls)
   const play = button('Play', async () => {
     try {
+      stopPreview('Preview ended; full-item playback controls are active.')
       if (audio.paused) await audio.play()
       else audio.pause()
     } catch {
       status.textContent = 'Playback could not start. Try refreshing the audio.'
     }
-  }, controls)
+  }, controls, 'primary')
   button('Rewind 15 sec', () => seek(audio.currentTime - 15), controls)
   audio.onplay = () => { play.textContent = 'Pause' }
   audio.onpause = audio.onended = () => { play.textContent = 'Play' }
@@ -105,6 +129,12 @@
   function update() {
     const duration = Number.isFinite(audio.duration) && audio.duration > 0
       ? audio.duration : 0
+    if (previewEnd !== null && audio.currentTime >= previewEnd) {
+      const end = previewEnd
+      stopPreview('Preview finished.')
+      if (previewResult) previewResult.textContent =
+        `Preview finished at ${clock(end)}. Adjust the selection or create the clip.`
+    }
     slider.disabled = !duration
     slider.max = String(duration || 1)
     slider.value = String(Math.min(audio.currentTime || 0, duration || 1))
@@ -116,6 +146,7 @@
   }
 
   async function loadAudio() {
+    stopPreview('Preview cancelled.')
     status.textContent = 'Loading audio…'
     try {
       const data = await request('/api/playback', 'POST', { kind, id })
@@ -128,7 +159,7 @@
       status.textContent = error.message
     }
   }
-  button('Refresh audio', loadAudio)
+  button('Refresh audio', loadAudio, header)
 
   if (kind === 'space') {
     const form = document.createElement('form')
@@ -151,14 +182,6 @@
     const note = document.createElement('p')
     note.textContent = 'Formats: 30, 30:00, 3:30:00. Saves a separate copy; original unchanged.'
     form.append(note)
-    const create = document.createElement('button')
-    create.type = 'submit'
-    create.textContent = 'Create clip copy'
-    form.append(create)
-    const result = document.createElement('p')
-    result.setAttribute('role', 'status')
-    form.append(result)
-    let rendering = false
 
     function parse(value) {
       if (!/^\d+(?:\.\d+)?(?::\d+(?:\.\d+)?){0,2}$/.test(value.trim())) return null
@@ -167,9 +190,51 @@
       const seconds = parts.reduce((a, b) => a * 60 + b, 0)
       return Number.isFinite(seconds) ? seconds : null
     }
+
+    button('Preview selection', () => {
+      const a = parse(start.value), b = parse(end.value)
+      if (a === null || b === null || b - a < 1) {
+        previewResult.textContent =
+          'Enter a valid range of at least 1 second, within the source recording.'
+        return
+      }
+      if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+        previewResult.textContent =
+          'The duration is not available yet, so preview cannot start.'
+        return
+      }
+      if (b > audio.duration) {
+        previewResult.textContent = 'That selection is beyond the available audio.'
+        return
+      }
+      stopPreview()
+      previewEnd = b
+      try {
+        audio.currentTime = a
+      } catch {
+        previewEnd = null
+        previewResult.textContent = 'That position is not available yet.'
+        return
+      }
+      audio.play()
+      previewResult.textContent = 'Previewing the selection. Playback pauses at End.'
+    }, form)
+    start.oninput = end.oninput = () => stopPreview('Preview cancelled.')
+
+    const create = document.createElement('button')
+    create.type = 'submit'
+    create.textContent = 'Create clip copy'
+    form.append(create)
+    const result = document.createElement('p')
+    result.setAttribute('role', 'status')
+    form.append(result)
+    previewResult = result
+    let rendering = false
+
     form.onsubmit = async event => {
       event.preventDefault()
       if (rendering) return
+      stopPreview('Preview cancelled.')
       const a = parse(start.value), b = parse(end.value)
       if (a === null || b === null || b - a < 1) {
         result.textContent = 'Enter a valid range of at least 1 second, within the source recording.'
@@ -237,15 +302,12 @@
   }
 
   const actions = document.createElement('div')
-  actions.className = 'manage-controls'
-  content.append(actions)
+  // Archive/Delete/Share sit beside Refresh in the selected-item header.
+  actions.className = 'manage-actions'
+  header.append(actions)
   let updating = false
   async function act(action) {
     if (updating) return
-    if (action === 'delete' && !confirm(
-      'Schedule deletion with a two-hour Restore window? ' +
-      'Deleting an active recording also requests capture stop.'
-    )) return
     updating = true
     const buttons = [...actions.querySelectorAll('button')]
     buttons.forEach(b => { b.disabled = true })
@@ -257,10 +319,12 @@
       const data = await call(action === 'archive' ? 'POST' : 'DELETE', path)
       if (data.ok !== true) throw new Error('Operation could not be confirmed.')
       if (action === 'delete') {
+        stopPreview()
         audio.pause()
         audio.removeAttribute('src')
         audio.load()
         content.remove()
+        header.remove()
         status.textContent = 'Deletion scheduled. Use /restore within two hours.'
       } else {
         status.textContent = data.item?.deleted_at
@@ -274,8 +338,107 @@
       buttons.forEach(b => { b.disabled = false })
     }
   }
-  button('Delete', () => act('delete'), actions)
-  button('Archive', () => act('archive'), actions)
+  if (kind === 'space') button('Archive', () => act('archive'), actions, 'gold')
+  button('Delete', () => act('delete'), actions, 'danger')
+
+  // Selected audio download and sharing tools v1, collapsed behind Share v2.
+  const sharing = document.createElement('section')
+  sharing.className = 'share-tools'
+  sharing.id = 'share-tools'
+  sharing.hidden = true
+  const shareHeading = document.createElement('h2')
+  shareHeading.textContent = 'Share & export'
+  sharing.append(shareHeading)
+  const downloadNote = document.createElement('p')
+  downloadNote.textContent =
+    'Prepare an audio download or sharing links for this exact selection.'
+  sharing.append(downloadNote)
+  let preparingShare = false
+
+  button('Prepare audio download', async () => {
+    if (preparingShare) return
+    preparingShare = true
+    try {
+      const data = await request('/api/share', 'POST', {
+        kind, id, download: true,
+        title: shareTitle.value.trim(), message: shareMessage.value.trim(),
+      })
+      if (typeof data.url !== 'string' || !/^https:\/\//.test(data.url)) {
+        throw new Error('Invalid download response.')
+      }
+      shareResult.textContent = ''
+      const link = document.createElement('a')
+      link.textContent = 'Download audio copy'
+      link.href = data.url
+      shareResult.append(link)
+    } catch {
+      shareResult.textContent =
+        'The download could not be prepared. Refresh the selected item and retry.'
+    } finally {
+      preparingShare = false
+    }
+  }, sharing)
+
+  const shareTitle = document.createElement('input')
+  shareTitle.placeholder = 'Shared clip title'
+  shareTitle.setAttribute('aria-label', 'Share title')
+  const titleField = document.createElement('label')
+  titleField.textContent = 'Share title (optional)'
+  titleField.append(shareTitle)
+  sharing.append(titleField)
+  const shareMessage = document.createElement('textarea')
+  shareMessage.placeholder = 'Listen & discuss'
+  shareMessage.setAttribute('aria-label', 'Share message')
+  const messageField = document.createElement('label')
+  messageField.textContent = 'Share message (optional)'
+  messageField.append(shareMessage)
+  sharing.append(messageField)
+
+  button('Prepare sharing links', async () => {
+    if (preparingShare) return
+    preparingShare = true
+    try {
+      const data = await request('/api/share', 'POST', {
+        kind, id,
+        title: shareTitle.value.trim(),
+        message: shareMessage.value.trim(),
+      })
+      if (data.ok !== true || typeof data.link !== 'string' ||
+          !/^https:\/\//.test(data.link)) {
+        throw new Error('Invalid sharing response.')
+      }
+      const subject = (shareTitle.value.trim().replace(/\s*\r?\n\s*/g, ' ').trim()) ||
+        'Shared recording'
+      const message = shareMessage.value.trim()
+      shareResult.textContent = ''
+      const telegram = document.createElement('a')
+      telegram.textContent = 'Choose Telegram chat'
+      telegram.href = `https://t.me/share/url?url=${encodeURIComponent(data.link)}&text=${encodeURIComponent(message)}`
+      shareResult.append(telegram, document.createElement('br'))
+      const email = document.createElement('a')
+      email.textContent = 'Open email draft'
+      email.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message + '\n' + data.link)}`
+      shareResult.append(email)
+    } catch {
+      shareResult.textContent = ''
+      status.textContent =
+        'Sharing links could not be prepared. Refresh the selected item and retry.'
+    } finally {
+      preparingShare = false
+    }
+  }, sharing)
+  const shareResult = document.createElement('p')
+  shareResult.setAttribute('role', 'status')
+  sharing.append(shareResult)
+
+  const shareToggle = button('Share', () => {
+    sharing.hidden = !sharing.hidden
+    shareToggle.setAttribute('aria-expanded', String(!sharing.hidden))
+  }, actions)
+  shareToggle.setAttribute('aria-expanded', 'false')
+  shareToggle.setAttribute('aria-controls', sharing.id)
+  content.append(sharing)
+
   update()
   await loadAudio()
 })().catch(() => {

@@ -1,7 +1,7 @@
 :root{color-scheme:light dark;--bg:var(--tg-theme-bg-color,#171614);--fg:var(--tg-theme-text-color,#cdccca);--ac:var(--tg-theme-button-color,#4f98a3)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
 main{max-width:640px;margin:auto;padding:16px}h1{font-size:1.5rem}h2{font-size:1.125rem;margin-top:24px}
-input{width:100%;min-height:44px;padding:8px 12px;margin:8px 0;border-radius:8px;border:1px solid #8884;background:transparent;color:inherit}
+input,textarea{width:100%;min-height:44px;padding:8px 12px;margin:8px 0;border-radius:8px;border:1px solid #8884;background:transparent;color:inherit}
 button{min-height:44px;padding:0 16px;border-radius:8px;background:var(--ac);color:#fff;font-weight:600;border:0}
 button.d{background:transparent;color:inherit;border:1px solid #8886;margin-left:8px}
 ul{list-style:none;padding:0}li{padding:12px 0;border-bottom:1px solid #8883}
@@ -11,3 +11,23 @@ ul{list-style:none;padding:0}li{padding:12px 0;border-bottom:1px solid #8883}
 button:disabled{opacity:.45;cursor:not-allowed}
 audio{width:100%}
 label{display:block;margin-top:12px}
+
+/* Exact mfer palette, scoped to the Manage view */
+.manage-view.mfer{
+  --mfer-bg:#ece1cd;--mfer-surface:#f7f1e4;--mfer-surface2:#e2d5bd;
+  --mfer-ink:#3b3629;--mfer-muted:#8a7f68;--mfer-border:#c9bda0;
+  --mfer-primary:#2f6f6a;--mfer-gold:#a97e2f;--mfer-danger:#a63d2f;--mfer-neutral:#6f6752;
+}
+.manage-view{background:var(--mfer-bg,var(--bg));color:var(--mfer-ink,var(--fg))}
+.manage-view .manage-heading{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.manage-view .manage-heading h1{flex:1 1 auto;margin:0}
+.manage-view .manage-heading > button{flex:0 0 auto}
+.manage-view .manage-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-left:auto}
+.manage-view .manage-actions button{flex:0 0 auto}
+.manage-view .share-tools[hidden]{display:none}
+.manage-view button[data-tone="primary"]{background:var(--mfer-primary)}
+.manage-view button[data-tone="gold"]{background:var(--mfer-gold)}
+.manage-view button[data-tone="danger"]{background:var(--mfer-danger)}
+.manage-view button[data-tone="neutral"]{background:var(--mfer-neutral)}
+.manage-view .share-tools{border:1px solid var(--mfer-border);border-radius:10px;padding:12px;margin-top:16px;background:var(--mfer-surface)}
+.manage-view .share-tools a{color:var(--mfer-primary)}
