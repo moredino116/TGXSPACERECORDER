@@ -62,7 +62,81 @@ async function dbQuery(sql, params = []) {
 }
 
 function migrate() {
-  getDb().exec(SQL)
+  const database = getDb()
+  database.exec(SQL)
+  require('./recording-capture-metadata').ensureRecordingCaptureMetadata(database)
+
+  // Retention migration v1: recordings and clips.
+  const columns = [
+    ['archived_at', 'TEXT'],
+    ['expires_at', 'TEXT'],
+    ['deleted_at', 'TEXT'],
+    ['purge_after', 'TEXT'],
+    ['retention_remaining_seconds', 'INTEGER'],
+  ]
+
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    for (const table of ['recordings', 'clips']) {
+      const existing = new Set(
+        database.prepare(`PRAGMA table_info(${table})`)
+          .all().map(column => column.name)
+      )
+      for (const [name, type] of columns) {
+        if (!existing.has(name)) {
+          database.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`)
+        }
+      }
+      database.exec(
+        `CREATE INDEX IF NOT EXISTS idx_${table}_purge_after
+         ON ${table}(purge_after)`
+      )
+      database.exec(
+        `CREATE INDEX IF NOT EXISTS idx_${table}_expires_at
+         ON ${table}(expires_at)`
+      )
+    }
+
+    // Completion retention defaults v1
+    for (const [table, stateColumn, completedState] of [
+      ['recordings', 'state', 'ready'],
+      ['clips', 'status', 'completed'],
+    ]) {
+      for (const [suffix, event] of [
+        ['insert', 'INSERT'],
+        ['update', `UPDATE OF ${stateColumn}`],
+      ]) {
+        database.exec(`
+          CREATE TRIGGER IF NOT EXISTS retention_${table}_${suffix}_v1
+          AFTER ${event} ON ${table}
+          WHEN NEW.${stateColumn} = '${completedState}'
+            AND NEW.archived_at IS NULL
+          BEGIN
+            UPDATE ${table}
+            SET expires_at = CASE
+                  WHEN deleted_at IS NULL AND expires_at IS NULL
+                  THEN datetime('now', '+15 days')
+                  ELSE expires_at
+                END,
+                retention_remaining_seconds = CASE
+                  WHEN deleted_at IS NOT NULL
+                    AND expires_at IS NULL
+                    AND retention_remaining_seconds IS NULL
+                  THEN 1296000
+                  ELSE retention_remaining_seconds
+                END
+            WHERE id = NEW.id;
+          END;
+        `)
+      }
+    }
+
+    database.exec('COMMIT')
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
+  }
 }
 
 module.exports = { dbQuery, migrate, translate, getDb, DB_PATH }
+

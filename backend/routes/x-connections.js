@@ -15,8 +15,9 @@ const { verifySession } = require('../lib/xapi')
 
 const router = Router()
 
-const WORKSPACE = 'local'
-const USER = 'local'
+// Telegram-owned X connections v1
+const { xConnectionOwnerGuard } = require('../lib/x-connection-owner')
+router.use(xConnectionOwnerGuard)
 
 // Shape returned to the frontend — NEVER includes encrypted_credentials or any
 // raw secret material.
@@ -50,10 +51,20 @@ function audit(event, conn) {
   )
 }
 
+// Fail-closed session sealing v1
+async function sealSession(cookie, csrf) {
+  try {
+    return await encryptSecret(JSON.stringify({ cookie, csrf: csrf || null }))
+  } catch {
+    return null
+  }
+}
+
 // OAuth entry point. If a supported X OAuth app is configured, this would return
 // an authorization URL. It isn't wired up in this environment, so we tell the
 // client to use the authenticated-session connector instead.
-router.post('/start', (_req, res) => {
+router.post('/start', (req, res) => {
+  const { workspace: WORKSPACE, user: USER } = req.xConnectionOwner
   res.json({
     ok: false,
     oauth_available: false,
@@ -66,6 +77,7 @@ router.post('/start', (_req, res) => {
 // Complete a connection with an authenticated session (auth_type: 'session').
 // Body: { auth_type, cookie, csrf, consent }
 router.post('/complete', async (req, res) => {
+  const { workspace: WORKSPACE, user: USER } = req.xConnectionOwner
   const { auth_type = 'session', cookie, csrf, consent } = req.body || {}
   if (auth_type !== 'session') {
     return res.status(400).json({ error: 'Unsupported connection type in this deployment.' })
@@ -91,9 +103,11 @@ router.post('/complete', async (req, res) => {
   }
 
   // Encrypt the minimum secret material needed (cookie + csrf) as one blob.
-  const { ciphertext, keyVersion } = await encryptSecret(
-    JSON.stringify({ cookie, csrf: csrf || null })
-  )
+  const sealed = await sealSession(cookie, csrf)
+  if (!sealed) return res.status(503).json({
+    ok: false, error: 'Connection could not be saved securely. Try again later.',
+  })
+  const { ciphertext, keyVersion } = sealed
 
   // One connection per X account within a workspace: update in place if it
   // already exists, else insert.
@@ -127,7 +141,8 @@ router.post('/complete', async (req, res) => {
 })
 
 // List connections (redacted).
-router.get('/', async (_req, res) => {
+router.get('/', async (req, res) => {
+  const { workspace: WORKSPACE, user: USER } = req.xConnectionOwner
   try {
     const { rows } = await dbQuery(
       "SELECT * FROM x_connections WHERE workspace_id=$1 AND status <> 'disconnected' ORDER BY created_at DESC",
@@ -140,6 +155,7 @@ router.get('/', async (_req, res) => {
 })
 
 router.get('/:id', async (req, res) => {
+  const { workspace: WORKSPACE, user: USER } = req.xConnectionOwner
   const { rows } = await dbQuery('SELECT * FROM x_connections WHERE id=$1 AND workspace_id=$2', [
     req.params.id,
     WORKSPACE,
@@ -150,6 +166,7 @@ router.get('/:id', async (req, res) => {
 
 // Re-check the stored session against X and update status.
 router.post('/:id/validate', async (req, res) => {
+  const { workspace: WORKSPACE, user: USER } = req.xConnectionOwner
   const { decryptSecret } = require('../lib/secretbox')
   const { rows } = await dbQuery('SELECT * FROM x_connections WHERE id=$1 AND workspace_id=$2', [
     req.params.id,
@@ -177,6 +194,7 @@ router.post('/:id/validate', async (req, res) => {
 
 // Reconnect = supply a fresh session for an existing connection.
 router.post('/:id/reconnect', async (req, res) => {
+  const { workspace: WORKSPACE, user: USER } = req.xConnectionOwner
   const { cookie, csrf, consent } = req.body || {}
   if (consent !== true) return res.status(400).json({ error: 'Confirmation is required to reconnect.' })
   if (!cookie) return res.status(400).json({ error: 'A fresh authenticated session is required.' })
@@ -188,7 +206,11 @@ router.post('/:id/reconnect', async (req, res) => {
   if (!conn) return res.status(404).json({ error: 'Connection not found' })
   const who = await verifySession(cookie, csrf)
   if (!who.ok) return res.status(400).json({ error: who.reason })
-  const { ciphertext, keyVersion } = await encryptSecret(JSON.stringify({ cookie, csrf: csrf || null }))
+  const sealed = await sealSession(cookie, csrf)
+  if (!sealed) return res.status(503).json({
+    ok: false, error: 'Connection could not be saved securely. Try again later.',
+  })
+  const { ciphertext, keyVersion } = sealed
   await dbQuery(
     `UPDATE x_connections SET encrypted_credentials=$1, credential_key_version=$2, status='active',
        x_handle=$3, display_name=$4, x_account_id=$5, last_validated_at=NOW(), revoked_at=NULL, updated_at=NOW()
@@ -203,6 +225,7 @@ router.post('/:id/reconnect', async (req, res) => {
 // Disconnect = wipe encrypted credentials and remove the connection. Logs the
 // deletion (metadata only).
 router.delete('/:id', async (req, res) => {
+  const { workspace: WORKSPACE, user: USER } = req.xConnectionOwner
   const { rows } = await dbQuery('SELECT * FROM x_connections WHERE id=$1 AND workspace_id=$2', [
     req.params.id,
     WORKSPACE,
@@ -220,3 +243,4 @@ router.delete('/:id', async (req, res) => {
 })
 
 module.exports = router
+

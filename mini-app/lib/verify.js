@@ -20,6 +20,22 @@ function verifyInitData(initData, botToken, allowedIds, maxAgeSec = 3600, now = 
 }
 // Allowed relay paths — must match backend/routes/space.js
 const RULES = [
+  // Private browser connection permissions v1
+  ['POST', /^x-browser\/start$/],
+  ['POST', /^x-browser\/b[a-f0-9]{48}\/(?:status|frame|input|finish|cancel|reconcile)$/],
+  // Narrow export management permissions v1
+  ['POST', /^space\/exports$/],
+  ['GET', /^space\/exports\/source\/(?:space|clip)\/[A-Za-z0-9_-]{1,100}$/],
+  ['GET', /^space\/exports\/e[a-f0-9]{32}$/],
+  ['DELETE', /^space\/exports\/e[a-f0-9]{32}$/],
+  // Owner-verified saved request status and retry.
+  ['GET', /^space\/requests\/[A-Za-z0-9_-]{1,100}$/],
+  ['POST', /^space\/requests\/[A-Za-z0-9_-]{1,100}\/resume$/],
+  // Telegram-owned X session management v1
+  ['GET', /^x-connections$/],
+  ['POST', /^x-connections\/complete$/],
+  ['POST', /^x-connections\/[A-Za-z0-9_-]{1,100}\/(?:validate|reconnect)$/],
+  ['DELETE', /^x-connections\/[A-Za-z0-9_-]{1,100}$/],
   // Clip-status polling permission v1
   ['GET', /^space\/recordings\/[A-Za-z0-9_-]{1,100}\/clips$/],
   // Direct-item management relay permissions v1
@@ -40,3 +56,4 @@ function allowed(method, path) {
   return RULES.some(([m, re]) => m === method && re.test(path))
 }
 module.exports = { verifyInitData, allowed }
+

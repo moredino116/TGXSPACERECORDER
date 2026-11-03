@@ -1,5 +1,7 @@
 const { verifyInitData, allowed } = require('../lib/verify')
 module.exports = async (req, res) => {
+  // Private relay cache policy v1
+  res.setHeader('Cache-Control', 'no-store')
   const { TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS, ORACLE_ORIGIN, RECORDER_RELAY_KEY } = process.env
   if (!TELEGRAM_BOT_TOKEN || !ORACLE_ORIGIN || !RECORDER_RELAY_KEY) return res.status(500).json({ error: 'Server not configured.' })
   const user = verifyInitData(req.headers['x-telegram-init-data'], TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_IDS)
@@ -22,3 +24,4 @@ module.exports = async (req, res) => {
     res.status(502).json({ error: 'Recorder unreachable.' })
   } finally { clearTimeout(t) }
 }
+
