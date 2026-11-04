@@ -11,7 +11,7 @@ function setup(saveWorks) {
   }
   const app = createRecorderBot({
     token: 'test-only',
-    relayKey: process.env.RECORDER_RELAY_KEY,
+    relayKey: 'test-only-relay-key',
     publicBaseUrl: 'https://recorder.example',
     miniAppBaseUrl: 'https://mini.example',
     allowedUserIds: ['42'],

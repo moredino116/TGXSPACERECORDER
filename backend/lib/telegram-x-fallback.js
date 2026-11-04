@@ -1,13 +1,17 @@
 // Uses only the owner-authenticated call supplied by the bot.
 // Never reads, transports, or returns session secrets.
-async function resolveWithSavedSession({ call, input, allowConnected = true }) {
+async function resolveWithSavedSession({ call, input, allowConnected = true, forceConnectedAccount = false }) {
   const response = await call('POST', '/api/space/resolve', { input })
   const initial = { response, access: {}, needsConnection: false }
   const body = response.json || {}
 
+  const eligibleForAccountRetry =
+    ['x_authentication_rejected', 'x_access_denied'].includes(body.code) ||
+    (forceConnectedAccount &&
+      ['x_lookup_unavailable', 'space_lookup_empty'].includes(body.code))
   if (response.status !== 200 || body.ok === true ||
-      body.canTryConnectedAccount !== true ||
-      !['x_authentication_rejected', 'x_access_denied'].includes(body.code)) {
+      body.canTryConnectedAccount !== true && !forceConnectedAccount ||
+      !eligibleForAccountRetry) {
     return initial
   }
 

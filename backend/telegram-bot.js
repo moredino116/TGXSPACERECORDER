@@ -296,13 +296,14 @@ function createRecorderBot({
       }]] } })
   }
 
-  async function startFromInput(chatId, input, ownerId) {
+  async function startFromInput(chatId, input, ownerId, { explicitRecord = false } = {}) {
     const ownerCall = (method, pathname, body) =>
       call(method, pathname, body, ownerId)
     const { resolveWithSavedSession } = require('./lib/telegram-x-fallback')
     const privateChat = String(chatId) === String(ownerId)
     const outcome = await resolveWithSavedSession({
       call: ownerCall, input, allowConnected: privateChat,
+      forceConnectedAccount: explicitRecord,
     })
     const resolved = outcome.response
     const access = outcome.access
@@ -531,7 +532,7 @@ function createRecorderBot({
         await send(chatId, 'Usage: /record <X Space link>')
         return
       }
-      return startFromInput(chatId, input, msg.from.id)
+      return startFromInput(chatId, input, msg.from.id, { explicitRecord: true })
     }
     if (command) {
       await send(chatId, 'Unknown command. Use /record, /process, /status, /archive, /clips, or /restore.')
