@@ -225,7 +225,7 @@ test('poll announces a watched recording and a saved file link', async () => {
   assert.equal(app.active.size, 0)
 })
 
-test('/process lists active first with exact-item Manage and Delete', async () => {
+test('/process excludes active jobs and shows completed items with Manage Delete Archive', async () => {
   const calls = []
   const { bot } = harness(async (method, pathname) => {
     calls.push({ method, pathname })

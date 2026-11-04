@@ -107,27 +107,24 @@ async function archiveList(fixture) {
   return rows
 }
 
-test('completed clip is automatically archived and has no expiry', async () => {
+test('completed clip remains unarchived and receives expiry', async () => {
   seed()
   const fixture = queueFixture()
   await fixture.run()
   const row = db.prepare('SELECT * FROM clips WHERE id=?').get('clip1')
   assert.equal(row.status, 'completed')
-  assert.ok(row.archived_at)
-  assert.equal(row.expires_at, null)
-  assert.equal(row.retention_remaining_seconds, null)
+  assert.equal(row.archived_at, null)
+  assert.ok(row.expires_at)
   assert.ok(row.size_bytes > 0)
 })
 
-test('completed clip appears directly in the actual archive collection', async () => {
+test('completed unarchived clip does not appear in the archive collection', async () => {
   seed()
   const fixture = queueFixture()
   await fixture.run()
   const rows = await archiveList(fixture)
   const clip = rows.find(row => row.id === 'clip1')
-  assert.ok(clip)
-  assert.equal(clip.item_kind, 'clip')
-  assert.equal(clip.available, true)
+  assert.equal(clip, undefined)
 })
 
 test('clip rendering does not modify or archive the original recording', async () => {
@@ -157,7 +154,7 @@ test('completion does not cancel or extend a deletion requested during rendering
   await fixture.run()
   const row = db.prepare('SELECT * FROM clips WHERE id=?').get('clip1')
   assert.equal(row.status, 'completed')
-  assert.ok(row.archived_at)
+  assert.equal(row.archived_at, null)
   assert.equal(Date.parse(row.deleted_at), 1000000)
   assert.equal(Date.parse(row.purge_after), 1000000 + HOLD_MS)
   assert.equal((await archiveList(fixture)).some(row => row.id === 'clip1'), false)

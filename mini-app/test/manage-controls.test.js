@@ -580,7 +580,7 @@ test('Share starts collapsed, toggles both ways, and names its controlled panel'
   assert.equal(q.calls.length, calls)
 })
 
-test('clip action row is Archive Share Delete', async () => {
+test('clip action row is Share Archive Delete', async () => {
   const q = await setup({ kind: 'clip' })
   const actions = q.button('Delete').parentNode
   assert.deepEqual(actions.children.map(n => n.textContent), ['Share', 'Archive', 'Delete'])

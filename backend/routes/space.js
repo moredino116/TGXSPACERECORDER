@@ -1833,9 +1833,7 @@ async function runClipQueue() {
     const size = fs.statSync(output).size
     await dbQuery(
       `UPDATE clips
-       SET status='completed', size_bytes=$1,
-           archived_at=COALESCE(archived_at, NOW()),
-           expires_at=NULL, retention_remaining_seconds=NULL
+       SET status='completed', size_bytes=$1
        WHERE id=$2`,
       [size, clip.id]
     )
