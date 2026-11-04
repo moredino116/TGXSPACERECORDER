@@ -72,4 +72,3 @@ async function resolveWithSavedSession({ call, input, allowConnected = true, for
 }
 
 module.exports = { resolveWithSavedSession }
-

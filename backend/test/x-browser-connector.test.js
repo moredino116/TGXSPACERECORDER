@@ -175,4 +175,3 @@ test('real Chromium adapter runs only against an intercepted local sign-in fixtu
     assert(requests.every(url=>url.startsWith('https://x.com/')))
   } finally {await resource.close()}
 })
-

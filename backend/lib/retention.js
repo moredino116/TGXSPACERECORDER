@@ -138,4 +138,3 @@ function createRetention(db, now = () => Date.now()) {
 }
 
 module.exports = { HOLD_MS, createRetention }
-

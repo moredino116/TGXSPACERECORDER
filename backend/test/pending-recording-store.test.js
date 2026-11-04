@@ -112,4 +112,3 @@ test('private-chat validation and metadata-only storage', t => {
   assert.equal(rows.length, 1)
   assert.equal(JSON.stringify(rows).includes('must-not-be-stored'), false)
 })
-

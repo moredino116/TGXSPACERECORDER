@@ -191,4 +191,3 @@ test('removed-export tombstones do not block permanent source deletion', () => {
   assert.equal(fs.existsSync(audio('target')), false)
   assert.equal(queue.get('telegram:7', job.id), null)
 })
-

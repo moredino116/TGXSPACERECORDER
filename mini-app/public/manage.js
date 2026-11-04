@@ -552,4 +552,3 @@
   const status = document.querySelector('[role="status"]')
   if (status) status.textContent = 'The Manage page could not initialize.'
 })
-

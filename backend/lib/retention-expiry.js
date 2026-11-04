@@ -46,4 +46,3 @@ function createExpiryWorker({
 }
 
 module.exports = { createExpiryWorker }
-

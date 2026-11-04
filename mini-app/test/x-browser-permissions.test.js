@@ -12,4 +12,3 @@ test('browser relay rejects GET frames, wildcard actions, traversal and arbitrar
       ['POST','x-browser/'+id+'/frame/extra'],['POST','x-browser/../frame'],
       ['POST','x-browser/not-a-lease/frame'],['POST','x-browser//start']]) assert.equal(allowed(method,path),false)
 })
-

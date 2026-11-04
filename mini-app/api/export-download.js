@@ -86,4 +86,3 @@ module.exports = async (req, res) => {
     clearTimeout(timer)
   }
 }
-

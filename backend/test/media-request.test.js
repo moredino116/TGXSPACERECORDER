@@ -127,4 +127,3 @@ test('staged wrapper: invalid-playlist errors exclude upstream body contents',as
   const api=routeFunctions(async()=>response(200,'private upstream body fixture_secret'))
   await assert.rejects(()=>api.getMediaPlaylist('https://cdn.example/a',secrets),e=>e.message==='The audio URL did not return an HLS playlist.')
 })
-

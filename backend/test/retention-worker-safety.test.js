@@ -265,4 +265,3 @@ test('workers refuse construction without an explicit busy-check function', () =
   assert.throws(() => createPurgeWorker({ db, archiveDir }), /busy check/)
   assert.throws(() => createExpiryWorker({ db }), /busy check/)
 })
-

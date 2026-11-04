@@ -188,4 +188,3 @@ test('runtime wiring constructs without opening storage or a browser',()=>{
   assert.equal(typeof service.connector.start,'function')
   assert.equal(typeof service.lookupSaved,'function')
 })
-

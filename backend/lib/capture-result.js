@@ -23,4 +23,3 @@ function completionText(row) {
 }
 
 module.exports = { archiveUnconfirmed, completionText }
-

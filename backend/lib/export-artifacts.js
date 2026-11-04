@@ -103,4 +103,3 @@ function planSourceExportCleanup(db, exportDir, kind, id) {
 }
 
 module.exports = { sourceHasExportWork, planSourceExportCleanup }
-

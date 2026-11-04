@@ -48,4 +48,3 @@ async function fetchMedia(url,ms=20000,extra={}, {fetchImpl=globalThis.fetch,use
   } catch(error) {throw safeError(error)}
 }
 module.exports={fetchMedia}
-

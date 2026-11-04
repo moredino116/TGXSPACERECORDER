@@ -251,4 +251,3 @@ test('mini-app entry loads the export interface after the player scripts', () =>
   assert.ok(html.includes('src="manage-exports.js"'))
   assert.ok(html.indexOf('src="manage.js"') < html.indexOf('src="manage-exports.js"'))
 })
-

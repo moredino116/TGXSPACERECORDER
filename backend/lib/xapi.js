@@ -77,4 +77,3 @@ async function verifySession(cookie, csrf) {
 }
 
 module.exports = { BEARER, UA, jsonFetch, csrfFrom, verifySession }
-

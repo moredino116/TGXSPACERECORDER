@@ -153,4 +153,3 @@ test('missing Telegram init data prevents network requests', async () => {
   assert.equal(q.calls.length, 0)
   assert.match(q.status(), /Open account setup from the bot/)
 })
-

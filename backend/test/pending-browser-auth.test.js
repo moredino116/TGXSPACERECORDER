@@ -31,4 +31,3 @@ test('owner status exposes the acknowledged sequence but never typed text or its
   assert(!JSON.stringify(status).includes('fixture private text'));assert(!Object.hasOwn(status,'lastInputDigest'))
   await f.connector.cancel('123',s.id)
 })
-

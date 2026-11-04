@@ -130,4 +130,3 @@ test('help command with a hidden link does not start recording', async () => {
   assert.equal(q.calls.length, 0)
   assert.equal(q.app.active.size, 0)
 })
-

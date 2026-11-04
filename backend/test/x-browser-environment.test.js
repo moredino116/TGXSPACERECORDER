@@ -28,4 +28,3 @@ test('actual staged driver explicitly supplies a minimal child environment befor
     assert.equal(options.env[key],undefined)
   assert.equal(typeof options.env.PATH,'string')
 })
-

@@ -180,4 +180,3 @@ function createXBrowserConnector({open,verify,save,lookupSaved=null,now=Date.now
   return {start,status,frame,input,finish,cancel,reconcile}
 }
 module.exports={createXBrowserConnector,validateInput}
-

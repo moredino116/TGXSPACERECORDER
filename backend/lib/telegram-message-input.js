@@ -62,4 +62,3 @@ function normalizeTelegramMessage(message) {
 }
 
 module.exports = { normalizeTelegramMessage }
-

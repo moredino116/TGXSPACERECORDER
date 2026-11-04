@@ -228,4 +228,3 @@ test('restore collection lists both deleted Spaces and clips inside their hold w
   const kinds = retention.listRestorable().map(row => row.item_kind).sort()
   assert.deepEqual(kinds, ['clip', 'space'])
 })
-

@@ -50,4 +50,3 @@ function attachXBrowserRoutes(router,{resolveOwner,getService}={}) {
   for(const action of ACTIONS) router.post('/:id/'+action,handler(action))
 }
 module.exports={attachXBrowserRoutes}
-

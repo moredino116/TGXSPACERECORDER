@@ -144,4 +144,3 @@ test('another verified owner cannot resume the request', async t => {
   assert.equal(r.statusCode, 404)
   assert.equal(q.calls.length, 0)
 })
-

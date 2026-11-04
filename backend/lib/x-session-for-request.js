@@ -87,4 +87,3 @@ async function sessionForRequest(body = {}, req, {
 }
 
 module.exports = { sessionForRequest }
-

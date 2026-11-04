@@ -330,4 +330,3 @@ test('real relay queue FFmpeg signer and file delivery work together for an inde
   assert.equal(fs.existsSync(audio), false)
   assert.equal(db.prepare('SELECT id FROM media_exports WHERE id=?').get(id), undefined)
 })
-

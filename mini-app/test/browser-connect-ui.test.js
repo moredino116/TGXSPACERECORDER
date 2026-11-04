@@ -195,4 +195,3 @@ test('mobile browser view has no horizontal overflow and maps private-image clic
   assert.equal(await f.page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false)
   await f.page.getByRole('button',{name:'Cancel connection',exact:true}).click()
 })
-

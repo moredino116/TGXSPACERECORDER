@@ -122,4 +122,3 @@ test('archive upsert updates capture metadata without resetting retention fields
   assert.equal(row.deleted_at, 'delete-date')
   assert.equal(row.purge_after, 'purge-date')
 })
-

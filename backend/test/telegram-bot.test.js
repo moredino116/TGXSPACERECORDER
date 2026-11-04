@@ -542,4 +542,3 @@ test('actual bot handler never submits conflicting Markdown Space targets', asyn
   })
   assert.equal(calls, 0)
 })
-

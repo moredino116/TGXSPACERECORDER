@@ -190,4 +190,3 @@ for (const kind of ['space', 'clip']) {
     assert.equal(path.basename(selectedFile), 'selected_item.m4a')
   })
 }
-

@@ -328,4 +328,3 @@
   const status = document.querySelector('[role="status"]')
   if (status) status.textContent = 'X account setup could not initialize.'
 })
-

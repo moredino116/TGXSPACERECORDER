@@ -339,4 +339,3 @@ test('a valid clip signature cannot be reused for another clip ID', async () => 
   const res = await request(url)
   assert.equal(res.statusCode, 401)
 })
-

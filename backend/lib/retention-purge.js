@@ -91,4 +91,3 @@ function createPurgeWorker({
 }
 
 module.exports = { createPurgeWorker }
-

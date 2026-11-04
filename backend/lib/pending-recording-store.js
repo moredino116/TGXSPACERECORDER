@@ -158,4 +158,3 @@ function createPendingRecordingStore(db) {
 }
 
 module.exports = { createPendingRecordingStore }
-

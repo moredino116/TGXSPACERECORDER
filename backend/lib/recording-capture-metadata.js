@@ -39,4 +39,3 @@ function captureMetadata(job) {
 }
 
 module.exports = { ensureRecordingCaptureMetadata, captureMetadata }
-

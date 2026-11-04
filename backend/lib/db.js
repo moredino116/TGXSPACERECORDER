@@ -139,4 +139,3 @@ function migrate() {
 }
 
 module.exports = { dbQuery, migrate, translate, getDb, DB_PATH }
-

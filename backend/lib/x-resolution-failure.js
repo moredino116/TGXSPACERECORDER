@@ -47,4 +47,3 @@ function resolutionFailure(stage, statuses = []) {
 }
 
 module.exports = { resolutionFailure }
-

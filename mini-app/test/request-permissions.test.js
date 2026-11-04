@@ -19,4 +19,3 @@ test('saved-request permissions reject traversal and extra path segments', () =>
   assert.equal(allowed('GET', 'space/requests/pending_test/extra'), false)
   assert.equal(allowed('POST', 'space/requests//resume'), false)
 })
-

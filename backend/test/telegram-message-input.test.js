@@ -54,4 +54,3 @@ test('multiple distinct Spaces are flagged for handler rejection', () => {
   })
   assert.equal(result.recorderInputAmbiguous, true)
 })
-

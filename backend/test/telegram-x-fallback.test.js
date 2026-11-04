@@ -160,4 +160,3 @@ test('connectx offers the mini-app only in a private chat', async () => {
   assert.equal(app.bot.sent[1].extra, undefined)
   assert(app.bot.sent[1].text.includes('private chat'))
 })
-

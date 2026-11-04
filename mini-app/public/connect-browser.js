@@ -210,4 +210,3 @@
   window.addEventListener('pagehide',()=>{closed=true;clearTimeout(pollTimer);text.value='';image.removeAttribute('src');for(const c of controllers)c.abort()})
   await load(true)
 })().catch(()=>{const node=document.querySelector('.x-browser-operation');if(node)node.textContent='The private connection interface could not initialize. Return to the bot.'})
-

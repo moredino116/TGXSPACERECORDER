@@ -197,4 +197,3 @@ test('failed rendering removes partial files and does not disclose process detai
   assert.equal(fs.readdirSync(exportRoot).some(n => n.startsWith('.render-')), false)
   assert.equal(digest(source), sourceDigest)
 })
-

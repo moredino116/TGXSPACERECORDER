@@ -25,4 +25,3 @@ test('export relay rejects file signing traversal and arbitrary export mutations
     ['GET', 'space/exports/' + id + '/extra'],
   ]) assert.equal(allowed(method, path), false, method + ' ' + path)
 })
-

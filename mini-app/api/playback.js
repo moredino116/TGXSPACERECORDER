@@ -75,4 +75,3 @@ module.exports = async (req, res) => {
 
   return res.status(200).json({ url: url.href, expires: Number(expires) })
 }
-

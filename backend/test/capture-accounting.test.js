@@ -253,4 +253,3 @@ test('capture time limit is not reported as a confirmed playlist end', async () 
   assert.equal(q.job.captureStopReason, 'time_limit')
   assert.equal(q.job.captureWarning, 'capture_end_unconfirmed')
 })
-

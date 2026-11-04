@@ -77,4 +77,3 @@ function usingManagedKey() {
 }
 
 module.exports = { encryptSecret, decryptSecret, usingManagedKey }
-

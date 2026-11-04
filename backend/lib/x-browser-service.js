@@ -21,4 +21,3 @@ function createXBrowserService() {
   return {connector,lookupSaved:store.lookupSaved}
 }
 module.exports={createXBrowserService}
-

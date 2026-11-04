@@ -63,4 +63,3 @@ CREATE TABLE IF NOT EXISTS app_keys (
 `
 
 module.exports = { SQL }
-

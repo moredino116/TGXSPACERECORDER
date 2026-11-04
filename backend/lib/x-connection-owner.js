@@ -36,4 +36,3 @@ function xConnectionOwnerGuard(req, res, next) {
 }
 
 module.exports = { resolveXConnectionOwner, xConnectionOwnerGuard }
-

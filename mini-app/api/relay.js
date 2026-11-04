@@ -24,4 +24,3 @@ module.exports = async (req, res) => {
     res.status(502).json({ error: 'Recorder unreachable.' })
   } finally { clearTimeout(t) }
 }
-

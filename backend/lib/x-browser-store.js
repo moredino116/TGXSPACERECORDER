@@ -99,4 +99,3 @@ function createBrowserConnectionStore({getDb,encryptSecret,now=()=>new Date().to
   return {save,lookupSaved}
 }
 module.exports={createBrowserConnectionStore}
-

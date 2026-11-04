@@ -593,4 +593,3 @@ test('confirmed deletion removes header controls as well as player and sharing',
     assert.equal(q.all().some(n => n.tag === 'button' && n.textContent === label), false)
   }
 })
-

@@ -214,4 +214,3 @@ function createCoverRenderer({
 }
 
 module.exports = { createCoverRenderer, PRESETS }
-

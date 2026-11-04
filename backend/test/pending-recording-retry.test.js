@@ -143,4 +143,3 @@ test('failure saving an acknowledged job never triggers another start', async t 
   assert.equal(q.calls.filter(c => c.kind === 'start').length, 1)
   assert.equal(JSON.stringify(result).includes('storage detail'), false)
 })
-

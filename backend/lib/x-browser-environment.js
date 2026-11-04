@@ -14,4 +14,3 @@ function browserEnvironment(env=process.env) {
   return result
 }
 module.exports={browserEnvironment}
-

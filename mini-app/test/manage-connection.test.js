@@ -184,4 +184,3 @@ test('root mini-app entry has no recording form or dashboard script', () => {
   assert.match(html, /Send Space links to the bot/)
   assert.doesNotMatch(html, /src=["']connect\.js["']/)
 })
-

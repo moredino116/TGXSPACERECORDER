@@ -206,4 +206,3 @@ test('tracking endpoints redact rows and verify terminal state before completion
   )
   assert.equal(q.store.get(row.id, '42').state, 'completed')
 })
-

@@ -56,4 +56,3 @@ function allowed(method, path) {
   return RULES.some(([m, re]) => m === method && re.test(path))
 }
 module.exports = { verifyInitData, allowed }
-

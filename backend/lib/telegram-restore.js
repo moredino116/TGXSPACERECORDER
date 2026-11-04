@@ -36,4 +36,3 @@ function createTelegramRestore({ call, send, clipLabel, formatClock }) {
   return { sendRestore, handleRestoreAction }
 }
 module.exports = { createTelegramRestore }
-

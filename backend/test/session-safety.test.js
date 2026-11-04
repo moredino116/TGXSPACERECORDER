@@ -157,4 +157,3 @@ test('unrelated upstream failure does not request a fresh X login', async () => 
   const {value}=await fallback({status:503,json:{ok:false,code:'x_unavailable'}})
   assert.equal(value.needsConnection,false);assert.equal(value.stop,true)
 })
-

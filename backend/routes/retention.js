@@ -94,4 +94,3 @@ router.post('/items/:kind/:id/archive', validateTarget, (req, res) => {
 })
 
 module.exports = router
-

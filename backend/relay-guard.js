@@ -36,4 +36,3 @@ module.exports = (req, res, next) => {
   if (loopback && !proxied) return next()
   return res.status(401).json({ error: 'Relay key required.' })
 }
-

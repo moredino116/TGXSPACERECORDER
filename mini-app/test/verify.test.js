@@ -56,4 +56,3 @@ test("X session-management permissions stay narrow", () => {
   assert(!allowed("POST", "x-connections/x1/reconnect/extra"))
   assert(!allowed("POST", "x-connections/" + "a".repeat(101) + "/reconnect"))
 })
-

@@ -862,4 +862,3 @@ module.exports = {
   formatClock,
   launchError,
 }
-

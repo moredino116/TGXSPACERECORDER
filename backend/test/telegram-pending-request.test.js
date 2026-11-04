@@ -57,4 +57,3 @@ test('failed persistence does not offer a misleading retry link', async () => {
   assert.equal(q.sent.at(-1).extra, undefined)
   assert.equal(q.calls.some(c => c.path === '/api/space/download'), false)
 })
-

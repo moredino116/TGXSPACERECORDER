@@ -114,4 +114,3 @@ test('invalid export identifiers cannot select arbitrary backend paths', async (
   assert.equal(result.statusCode, 400)
   assert.equal(calls.length, 0)
 })
-
