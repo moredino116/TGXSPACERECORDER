@@ -89,7 +89,7 @@ function botFixture(status) {
     async sendMessage(chatId, text) { sent.push(text) }
   }
   const app = createRecorderBot({
-    token: 'test-only', relayKey: process.env.RECORDER_RELAY_KEY,
+    token: 'test-only', relayKey: 'test-only-relay-key',
     publicBaseUrl: 'https://recorder.example',
     miniAppBaseUrl: 'https://mini.example',
     allowedUserIds: ['42'], Bot: FakeBot,

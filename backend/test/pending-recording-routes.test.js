@@ -1,6 +1,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+process.env.RECORDER_RELAY_KEY = 'test-only-relay-key'
 const os = require('node:os')
 const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')

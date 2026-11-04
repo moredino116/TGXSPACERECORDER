@@ -6,6 +6,8 @@ const path = require('node:path')
 const { DatabaseSync } = require('node:sqlite')
 const { createPendingRecordingStore } = require('../lib/pending-recording-store')
 const { createRecorderBot } = require('../telegram-bot')
+process.env.RECORDER_RELAY_KEY = 'test-only-relay-key'
+process.env.TELEGRAM_ALLOWED_USER_IDS = '42'
 const { attachPendingRecordingRoutes } = require('../lib/pending-recording-routes')
 
 function database(t) {
@@ -56,6 +58,18 @@ function backend({ ackFails = 0 } = {}) {
         requestId: 'pending_test', jobId: 'mock_job',
         spaceId: '1rxmqpPayldxy', state: 'recording',
       }] : [] },
+    }
+    if (route === '/api/space/process') return {
+      status: 200,
+      json: {
+        ok: true,
+        active: [{
+          id: 'mock_job',
+          item_kind: 'space',
+          state: 'downloading',
+          title: 'Mock Space',
+        }],
+      },
     }
     if (route === '/api/space/status/mock_job') return {
       status: 200, json: { state: state.jobState, name: 'Mock Space' },
