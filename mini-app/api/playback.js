@@ -40,8 +40,9 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Invalid request body.' })
   }
 
-  const { kind, id } = body || {}
-  if (!['space', 'clip'].includes(kind) ||
+  // Signed audio download v1
+  const { kind, id, download = false } = body || {}
+  if (typeof download !== 'boolean' || !['space', 'clip'].includes(kind) ||
       typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) {
     return res.status(400).json({ error: 'Invalid item kind or ID.' })
   }
@@ -61,12 +62,14 @@ module.exports = async (req, res) => {
 
   const pathname = kind === 'clip'
     ? `/api/space/clip/${id}/file`
-    : `/api/space/preview/${id}`
+    : download ? `/api/space/file/${id}` : `/api/space/preview/${id}`
   const expires = String(Math.floor(Date.now() / 1000) + 3600)
   const signature = crypto.createHmac('sha256', RECORDER_RELAY_KEY)
     .update(pathname + '\n' + expires).digest('hex')
   const url = new URL(pathname, origin)
-  url.searchParams.set('play', '1')
+  // Explicit download disposition v1
+  if (download) url.searchParams.set('download', '1')
+  else url.searchParams.set('play', '1')
   url.searchParams.set('expires', expires)
   url.searchParams.set('signature', signature)
 

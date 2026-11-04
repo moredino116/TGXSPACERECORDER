@@ -25,42 +25,12 @@ function deriveFromEnv(secret) {
   return crypto.createHash('sha256').update(String(secret)).digest()
 }
 
+// Durable session key provider v1
+const durableActiveKey = require('./secretbox-key-store').createDurableKeyProvider({
+  dbQuery, env: process.env, keyCache,
+})
 async function getActiveKey() {
-  if (process.env.X_CONN_ENC_KEY) {
-    const version = 'env'
-    if (!keyCache.has(version)) keyCache.set(version, deriveFromEnv(process.env.X_CONN_ENC_KEY))
-    return { version, key: keyCache.get(version) }
-  }
-  // Use the newest generated key, or mint one on first use.
-  try {
-    const { rows } = await dbQuery(
-      'SELECT version, key_hex FROM app_keys ORDER BY created_at DESC LIMIT 1'
-    )
-    if (rows[0]) {
-      const version = rows[0].version
-      if (!keyCache.has(version)) keyCache.set(version, Buffer.from(rows[0].key_hex, 'hex'))
-      return { version, key: keyCache.get(version) }
-    }
-  } catch {
-    // table may not be synced yet on very first boot — fall through to mint
-  }
-  const version = 'v1'
-  const key = crypto.randomBytes(32)
-  try {
-    await dbQuery('INSERT INTO app_keys (version, key_hex) VALUES ($1, $2) ON CONFLICT (version) DO NOTHING', [
-      version,
-      key.toString('hex'),
-    ])
-    // Re-read in case a concurrent boot inserted first.
-    const { rows } = await dbQuery('SELECT key_hex FROM app_keys WHERE version = $1', [version])
-    const finalKey = rows[0] ? Buffer.from(rows[0].key_hex, 'hex') : key
-    keyCache.set(version, finalKey)
-    return { version, key: finalKey }
-  } catch (e) {
-    // As a last resort keep an in-memory key for this process.
-    keyCache.set(version, key)
-    return { version, key }
-  }
+  return durableActiveKey()
 }
 
 async function getKeyByVersion(version) {

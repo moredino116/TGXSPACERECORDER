@@ -5,6 +5,25 @@
 const crypto = require('crypto')
 module.exports = (req, res, next) => {
   const key = process.env.RECORDER_RELAY_KEY
+
+  // Signed playback links v1
+  const signedPlaybackAllowed = /^\/space\/(?:file|preview)\/[A-Za-z0-9_-]+$/.test(req.path)
+    || /^\/space\/clip\/[A-Za-z0-9_-]+\/file$/.test(req.path)
+    || /^\/space\/exports\/e[a-f0-9]{32}\/file$/.test(req.path)
+  if (key && signedPlaybackAllowed && ['GET', 'HEAD'].includes(req.method)) {
+    const signedExpiry = String(req.query.expires || '')
+    const signedValue = String(req.query.signature || '')
+    const signedNow = Math.floor(Date.now() / 1000)
+    if (/^\d{10}$/.test(signedExpiry) && Number(signedExpiry) > signedNow
+        && Number(signedExpiry) <= signedNow + 86460
+        && /^[a-f0-9]{64}$/.test(signedValue)) {
+      const signedExpected = crypto.createHmac('sha256', key)
+        .update('/api' + req.path + '\n' + signedExpiry).digest('hex')
+      if (crypto.timingSafeEqual(Buffer.from(signedValue, 'hex'),
+          Buffer.from(signedExpected, 'hex'))) return next()
+    }
+  }
+
   const given = req.headers['x-relay-key']
   if (given) {
     const a = Buffer.from(String(given)), b = Buffer.from(String(key || ''))
