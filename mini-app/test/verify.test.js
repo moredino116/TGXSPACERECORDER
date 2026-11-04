@@ -9,7 +9,7 @@ test("rejects other user",()=>assert.equal(verifyInitData(sign({id:7},now/1000),
 test("rejects tampered",()=>assert.equal(verifyInitData(sign({id:42},now/1000).replace("42","43"),TOK,"42",3600,now),null))
 test("rejects expired",()=>assert.equal(verifyInitData(sign({id:42},now/1000-9999),TOK,"42",3600,now),null))
 test("rejects empty allowlist",()=>assert.equal(verifyInitData(sign({id:42},now/1000),TOK,"",3600,now),null))
-test("allowlist",()=>{assert(allowed("POST","space/stop/abc"));assert(!allowed("GET","x-connections"));assert(!allowed("GET","space/../x"));assert(!allowed("DELETE","space/stop/a"))})
+test("allowlist",()=>{assert(allowed("POST","space/stop/abc"));assert(!allowed("GET","x-connections/x1/credentials"));assert(!allowed("GET","space/../x"));assert(!allowed("DELETE","space/stop/a"))})
 
 test("direct-item management permissions stay narrow", () => {
   assert(allowed("GET", "space/process"))
@@ -40,3 +40,20 @@ test("clip-status polling permissions stay narrow", () => {
   assert(!allowed("GET", "space/recordings/rec_123/clips?extra=1"))
   assert(!allowed("GET", "space/recordings/rec_123/file"))
 })
+
+
+test("X session-management permissions stay narrow", () => {
+  assert(allowed("GET", "x-connections"))
+  assert(allowed("POST", "x-connections/complete"))
+  assert(allowed("POST", "x-connections/x1/validate"))
+  assert(allowed("POST", "x-connections/x1/reconnect"))
+  assert(allowed("DELETE", "x-connections/x1"))
+  assert(!allowed("GET", "x-connections/x1"))
+  assert(!allowed("POST", "x-connections/start"))
+  assert(!allowed("DELETE", "x-connections"))
+  assert(!allowed("GET", "x-connections/x1/credentials"))
+  assert(!allowed("POST", "x-connections/../reconnect"))
+  assert(!allowed("POST", "x-connections/x1/reconnect/extra"))
+  assert(!allowed("POST", "x-connections/" + "a".repeat(101) + "/reconnect"))
+})
+

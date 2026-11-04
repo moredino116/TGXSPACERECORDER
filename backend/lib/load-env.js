@@ -26,3 +26,4 @@ function loadEnv(envPath = path.join(__dirname, '..', '.env')) {
 }
 
 module.exports = { loadEnv }
+

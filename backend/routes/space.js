@@ -1,3 +1,4 @@
+// Retention collection filtering v1
 const { Router } = require('express')
 const { execFile } = require('child_process')
 const ffmpegPath = require('ffmpeg-static')
@@ -9,6 +10,182 @@ const fs = require('fs')
 const https = require('https')
 
 const router = Router()
+
+// Two-hour delete integration v1
+const { getDb: retentionDb } = require('../lib/db')
+const { createRetention } = require('../lib/retention')
+
+
+// Pending-deletion access guard v1
+router.use((req, res, next) => {
+  let table
+  let id
+  let match
+
+  if ((match = req.path.match(/^\/(?:file|preview)\/([^/]+)\/?$/))) {
+    table = 'recordings'
+    id = match[1]
+  } else if ((match = req.path.match(
+    /^\/recordings\/([^/]+)\/(?:duration|clips)\/?$/
+  ))) {
+    table = 'recordings'
+    id = match[1]
+  } else if ((match = req.path.match(/^\/clip\/([^/]+)\/file\/?$/))) {
+    table = 'clips'
+    id = match[1]
+  } else {
+    return next()
+  }
+
+  try {
+    const row = retentionDb().prepare(
+      `SELECT deleted_at FROM ${table} WHERE id = ?`
+    ).get(id)
+
+    if (row && row.deleted_at) {
+      res.setHeader('Cache-Control', 'no-store')
+      return res.status(410).json({
+        ok: false,
+        error: 'Item is pending deletion. Check Restore for availability.',
+      })
+    }
+    return next()
+  } catch (error) {
+    console.error('[retention] access check failed:',
+      String(error?.message || error))
+    return res.status(503).json({
+      ok: false,
+      error: 'Could not verify item availability',
+    })
+  }
+})
+
+function scheduleItemDeletion(kind, id) {
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(id || '')) {
+    const error = new Error('Invalid item ID')
+    error.httpStatus = 400
+    throw error
+  }
+
+  const db = retentionDb()
+  const job = kind === 'space' ? jobs.get(id) : null
+
+  if (job) {
+    // Persist active-job identity without replacing existing retention fields.
+    db.prepare(
+      `INSERT INTO recordings
+       (id, name, title, kind, state, duration_seconds)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO NOTHING`
+    ).run(
+      job.id,
+      job.name || job.baseName || job.id,
+      job.title || null,
+      job.kind || 'live',
+      job.state,
+      job.recordedSecs || 0
+    )
+  }
+
+  const retention = createRetention(db)
+  const row = retention.softDelete(kind, id)
+
+  if (job) {
+    job.deletionRequested = true
+    if (job.state === 'downloading') job.state = 'stopped'
+  }
+
+  return {
+    ok: true,
+    id: row.id,
+    item_kind: kind,
+    deleted_at: row.deleted_at,
+    purge_after: row.purge_after,
+    archived_at: row.archived_at,
+    capture_stop_requested: Boolean(job && job.state === 'stopped'),
+  }
+}
+
+function handleItemDeletion(kind) {
+  return (req, res) => {
+    res.setHeader('Cache-Control', 'no-store')
+    try {
+      return res.json(scheduleItemDeletion(kind, req.params.id))
+    } catch (error) {
+      const message = String(error?.message || error)
+      const status = error.httpStatus ||
+        (message === 'Item not found' ? 404 : 500)
+      if (status === 500) {
+        console.error('[retention] deletion scheduling failed:', message)
+      }
+      return res.status(status).json({
+        ok: false,
+        error: status === 500
+          ? 'Could not schedule deletion; no capture stop was requested'
+          : message,
+      })
+    }
+  }
+}
+
+router.delete('/archive/:id', handleItemDeletion('space'))
+router.delete('/clips/:id', handleItemDeletion('clip'))
+
+// Active-recording archive integration v1
+router.post('/recordings/:id/archive', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  const id = req.params.id
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(id || '')) {
+    return res.status(400).json({ ok: false, error: 'Invalid item ID' })
+  }
+
+  try {
+    const db = retentionDb()
+    const job = jobs.get(id)
+
+    if (job) {
+      db.prepare(
+        `INSERT INTO recordings
+         (id, name, title, kind, state, duration_seconds)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`
+      ).run(
+        job.id,
+        job.name || job.baseName || job.id,
+        job.title || null,
+        job.kind || 'live',
+        job.state,
+        job.recordedSecs || 0
+      )
+    }
+
+    const row = createRetention(db).archive('space', id)
+    return res.json({
+      ok: true,
+      item: {
+        id: row.id,
+        item_kind: 'space',
+        title: row.title || row.name || row.id,
+        archived_at: row.archived_at,
+        expires_at: row.expires_at,
+        deleted_at: row.deleted_at,
+        purge_after: row.purge_after,
+      },
+    })
+  } catch (error) {
+    const message = String(error?.message || error)
+    const status = message === 'Item not found' ? 404 : 500
+    if (status === 500) {
+      console.error('[retention] recording archive failed:', message)
+    }
+    return res.status(status).json({
+      ok: false,
+      error: status === 404 ? message : 'Could not archive recording',
+    })
+  }
+})
+
+
 
 const BEARER =
   'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
@@ -41,6 +218,9 @@ function activeCount() {
   return n
 }
 async function sweepOldRecordings() {
+  // Retention safety interlock v1: legacy age-based purge disabled.
+  return
+
   try {
     const cutoff = Date.now() - RETENTION_DAYS * 86400000
     const { rows } = await dbQuery(
@@ -95,30 +275,48 @@ function safeJson(s) {
     return null
   }
 }
-// fetch() with a hard timeout so a hung CDN connection can never freeze a job.
-// `extra` lets a job pass its X login cookie so segment/playlist requests to
-// the CDN are authenticated when the audio is login-restricted. We deliberately
-// send ONLY User-Agent + Referer to the CDN (no Origin) — some CDN edges reject
-// requests that carry an unexpected Origin, which silently breaks segment fetches.
+// Destination-scoped media transport v1.
+// Public media keeps User-Agent/Referer without account cookies or Origin.
+// Account headers are restricted to explicit HTTPS X hosts and are permanently
+// stripped after a cross-origin redirect. One timeout covers redirects and body.
+// Fixed-host X lookup/session-verification requests use their separate helpers.
 async function fetchWithTimeout(url, ms = 20000, extra = {}) {
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), ms)
-  try {
-    return await fetch(url, {
-      headers: { 'User-Agent': UA, Referer: 'https://x.com/', ...extra },
-      signal: ctrl.signal,
-    })
-  } finally {
-    clearTimeout(t)
-  }
+  return require('../lib/media-request').fetchMedia(url, ms, extra, {
+    fetchImpl: fetch, userAgent: UA,
+  })
 }
 async function fetchText(url, extra = {}) {
   const r = await fetchWithTimeout(url, 20000, extra)
-  if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`)
+  if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return await r.text()
 }
+// Public-header audio fallback v1
+let publicAudioFallbackLogged = false
+
 async function fetchBuf(url, extra = {}) {
-  const r = await fetchWithTimeout(url, 20000, extra)
+  let r = await fetchWithTimeout(url, 20000, extra)
+
+  if (r.status === 400) {
+    const originalHadCookie = Object.keys(extra)
+      .some(key => key.toLowerCase() === 'cookie')
+
+    try {
+      await r.body?.cancel()
+    } catch {}
+
+    r = await fetchWithTimeout(url, 20000, {
+      'User-Agent': 'Mozilla/5.0',
+    })
+
+    if (r.ok && !publicAudioFallbackLogged) {
+      publicAudioFallbackLogged = true
+      console.log(
+        '[space] audio HTTP 400 recovered with public headers;',
+        'original cookie present:', originalHadCookie
+      )
+    }
+  }
+
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return Buffer.from(await r.arrayBuffer())
 }
@@ -139,11 +337,12 @@ async function fetchBufRetry(url, tries = 4, extra = {}) {
 
 // ---- X Space resolution (best-effort) --------------------------------------
 
-async function getGuestToken() {
+async function getGuestToken(diagnostics = []) {
   const r = await jsonFetch('https://api.twitter.com/1.1/guest/activate.json', {
     method: 'POST',
     headers: { Authorization: `Bearer ${BEARER}`, 'User-Agent': UA },
   })
+  diagnostics.push(Number(r.status) || 0)
   return r.json?.guest_token || null
 }
 
@@ -187,7 +386,7 @@ function parseSpaceId(input) {
   if (/^[A-Za-z0-9]{10,}$/.test(s)) return s
   return null
 }
-async function audioSpaceById(spaceId, guestToken, cookie, csrf) {
+async function audioSpaceById(spaceId, guestToken, cookie, csrf, diagnostics = []) {
   const variables = { id: spaceId, isMetatagsQuery: false, withReplays: true, withListeners: true }
   const features = {
     spaces_2022_h2_spaces_communities: true,
@@ -209,6 +408,7 @@ async function audioSpaceById(spaceId, guestToken, cookie, csrf) {
       '&features=' +
       encodeURIComponent(JSON.stringify(features))
     const r = await jsonFetch(url, { headers })
+    diagnostics.push(Number(r.status) || 0)
     const as = r.json?.data?.audioSpace
     // X returns an EMPTY object ({}) for guest/unauthenticated reads now — that's
     // not a real hit. Only accept it when it actually carries Space data.
@@ -219,10 +419,11 @@ async function audioSpaceById(spaceId, guestToken, cookie, csrf) {
   // rather than claiming the Space simply doesn't exist.
   return sawEmpty ? { __empty: true } : null
 }
-async function streamStatus(mediaKey, guestToken, cookie, csrf) {
+async function streamStatus(mediaKey, guestToken, cookie, csrf, diagnostics = []) {
   const headers = xHeaders(guestToken, cookie, csrf)
   const url = `https://twitter.com/i/api/1.1/live_video_stream/status/${mediaKey}?client=web&use_syndication_guest_id=false&cookie_set_host=x.com`
   const r = await jsonFetch(url, { headers })
+  diagnostics.push(Number(r.status) || 0)
   const src = r.json?.source
   return src?.noRedirectPlaybackUrl || src?.location || null
 }
@@ -294,11 +495,7 @@ async function getMediaPlaylist(url, extra = {}) {
   // Guard: if X/CDN returns an error page or JSON instead of a playlist, parsing
   // it would yield 0 segments + no ENDLIST and loop forever. Fail loudly instead.
   if (!text.includes('#EXTM3U')) {
-    throw new Error(
-      'The audio URL did not return a playable stream (got: ' +
-        text.trim().slice(0, 120).replace(/\s+/g, ' ') +
-        '). The stream may be geo/login-restricted.'
-    )
+    throw new Error('The audio URL did not return an HLS playlist.')
   }
   if (text.includes('#EXT-X-STREAM-INF')) {
     const variant = pickVariant(text, url)
@@ -340,21 +537,38 @@ function processLocal(inFile, outFile, enhance) {
 }
 
 async function archiveInsert(job) {
-  try {
+  const { captureMetadata } = require('../lib/recording-capture-metadata')
+  job.archiveStatus = 'pending'
+  job.archiveError = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
     await dbQuery(
-      `INSERT INTO recordings (id, name, title, source, kind, m3u8, file_path, size_bytes, duration_seconds, enhanced, state, access_mode, x_connection_id, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW())
-       ON CONFLICT (id) DO UPDATE SET size_bytes=EXCLUDED.size_bytes, file_path=EXCLUDED.file_path, state=EXCLUDED.state, name=EXCLUDED.name, duration_seconds=EXCLUDED.duration_seconds`,
+      `INSERT INTO recordings (id, name, title, source, kind, m3u8, file_path, size_bytes, duration_seconds, enhanced, state, access_mode, x_connection_id, capture_warning, capture_stop_reason, captured_segments, captured_bytes, gap_seconds, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18, NOW())
+       ON CONFLICT (id) DO UPDATE SET size_bytes=EXCLUDED.size_bytes, file_path=EXCLUDED.file_path, state=EXCLUDED.state, name=EXCLUDED.name, duration_seconds=EXCLUDED.duration_seconds,
+        capture_warning=EXCLUDED.capture_warning,
+        capture_stop_reason=EXCLUDED.capture_stop_reason,
+        captured_segments=EXCLUDED.captured_segments,
+        captured_bytes=EXCLUDED.captured_bytes,
+        gap_seconds=EXCLUDED.gap_seconds`,
       [
         job.id, job.name, job.title || null, job.sourceKind || 'stream',
         job.kind, job.m3u8 || null, job.file, job.sizeBytes || 0,
-        Math.round(job.recordedSecs || job.totalSecs || 0),
+        Math.round(job.recordedSecs || 0),
         !!job.enhance, 'ready', job.accessMode || 'public', job.xConnectionId || null,
+        ...captureMetadata(job),
       ]
     )
-  } catch (e) {
-    console.error('[space] archive insert failed:', e?.message || e)
+      job.archiveStatus = 'indexed'
+      return true
+    } catch {
+      if (attempt < 2) await sleep(250 * (attempt + 1))
+    }
   }
+  job.archiveStatus = 'failed'
+  job.archiveError = 'archive_index_failed'
+  console.error('[space] archive indexing failed; captured file retained')
+  return false
 }
 
 // Read the true audio duration (seconds) of a local file via ffmpeg. Used when a
@@ -399,7 +613,150 @@ function recordingFile(id) {
 
 // ---- the download job -------------------------------------------------------
 
+
+// Historical recovery is separate from live capture: no unsafe concatenation.
+// Historical discovery retry v3
+// Live-template historical recovery v4
+function mapHistoricalSnapshot(media, live) {
+  if (media.initUri || !live.segments.length)
+    throw new Error('Unsupported historical mapping or empty live playlist')
+  const segments = media.segments.map(value => {
+    const name = new URL(value).pathname.split('/').pop()
+    if (!/^chunk_[\w.-]+\.aac$/.test(name))
+      throw new Error('Unsupported historical filename')
+    const url = new URL(live.segments[0])
+    url.pathname = url.pathname.replace(/[^/]+$/, name)
+    return url.href
+  })
+  return { ...media, segments, hasEndList: true }
+}
+
+async function startHistoricalCompanion(parent, originalUrl, hdr, log) {
+  const master = new URL(originalUrl)
+  if (!/\/dynamic_playlist\.m3u8$/.test(master.pathname)) return
+  master.pathname = master.pathname.replace(
+    /dynamic_playlist\.m3u8$/, 'master_playlist.m3u8'
+  )
+  master.searchParams.delete('type')
+
+  const active = () =>
+    jobs.get(parent.id) === parent &&
+    parent.state === 'downloading' &&
+    !parent.historicalJobId
+
+  for (let attempt = 1; attempt <= 12; attempt++) {
+    if (!active()) return
+    log('historical discovery attempt:', attempt, '/ 12')
+
+    try {
+      const text = await fetchText(master.href, hdr)
+      if (!text.includes('#EXTM3U')) {
+        throw new Error('invalid master playlist')
+      }
+
+      const entries = text.split(/\r?\n/).map(s => s.trim())
+        .filter(s => s && !s.startsWith('#'))
+      const seen = new Set()
+
+      for (const entry of entries.slice(0, 12)) {
+        if (!active()) return
+
+        let candidate
+        try {
+          candidate = new URL(entry, master.href)
+        } catch {
+          continue
+        }
+
+        if (candidate.origin !== master.origin) continue
+        if (/dynamic_playlist\.m3u8$/.test(candidate.pathname)) continue
+        candidate.searchParams.set('type', 'replay')
+        if (seen.has(candidate.href)) continue
+        seen.add(candidate.href)
+
+        const label = candidate.pathname.split('/').pop()
+        let historical
+        try {
+          historical = await getMediaPlaylist(candidate.href, hdr)
+          if (!historical.segments.length) continue
+          const live = await getMediaPlaylist(originalUrl, hdr)
+          const mapped = mapHistoricalSnapshot(historical, live)
+          const indices = [...new Set([
+            0, Math.floor(mapped.segments.length / 2),
+            mapped.segments.length - 1
+          ])]
+          for (const i of indices)
+            await fetchBufRetry(mapped.segments[i], 3, hdr)
+        } catch (e) {
+          log('historical mapping validation failed:',
+            String(e?.message || e)
+              .replace(/https?:\/\/\S+/g, '[URL omitted]').slice(0, 200))
+          continue
+        }
+
+        if (!active()) return
+
+        const title = (parent.title || parent.baseName || 'Space')
+          + ' - historical recovery'
+        const companion = createJob({
+          m3u8: historical.url,
+          historicalLiveUrl: originalUrl,
+          name: title,
+          title,
+          source: 'space',
+          input: null,
+          enhance: false,
+          cookie: parent.cookie,
+          csrf: parent.csrf,
+          groupId: parent.groupId,
+          role: 'backup',
+          accessMode: parent.accessMode,
+          xConnectionId: parent.xConnectionId,
+        })
+
+        if (!companion) {
+          log('historical recovery waiting for recorder capacity')
+          break
+        }
+
+        parent.historicalJobId = companion.id
+        const seconds = historical.durations.reduce((a, b) => a + b, 0)
+        log('historical recovery started:',
+          companion.id,
+          'listed seconds:', Math.round(seconds),
+          'segments:', historical.segments.length,
+          'first chunk:',
+          new URL(historical.segments[0]).pathname.split('/').pop())
+        return
+      }
+    } catch {
+      log('historical discovery request failed; attempt:', attempt)
+    }
+
+    if (attempt < 12 && active()) await sleep(15000)
+  }
+
+  if (active()) {
+    log('historical recovery unavailable after 12 discovery attempts')
+  }
+}
+
 async function runJob(job, m3u8) {
+  function safeCaptureError(error) {
+    const message = String(error?.message || '')
+    const http = /^HTTP (\d{3})(?:\s|$)/.exec(message)
+    if (http) return 'Audio request failed (HTTP ' + http[1] + ').'
+    if (['AbortError', 'TimeoutError'].includes(error?.name)) {
+      return 'Audio request timed out.'
+    }
+    const known = [
+      'No audio segments were downloaded.',
+      'No audio data returned for segment.',
+      'No audio was received within 90 seconds. The cause is not yet established.',
+    ]
+    if (known.includes(message)) return message
+    return 'Audio capture failed. The underlying cause requires diagnosis.'
+  }
   const rawFile = path.join(DL_DIR, `${job.id}.raw`)
   const ws = fs.createWriteStream(rawFile)
   const writeBuf = (buf) => new Promise((res, rej) => ws.write(buf, (e) => (e ? rej(e) : res())))
@@ -409,8 +766,25 @@ async function runJob(job, m3u8) {
   // often login-restricted and the raw segments 403 without it.
   const hdr = job.cookie ? { Cookie: job.cookie } : {}
   const log = (...a) => console.log(`[job ${job.id}]`, ...a)
+
+  async function loadJobPlaylist(url) {
+    const media = await getMediaPlaylist(url, hdr)
+    if (!job.historicalLiveUrl) return media
+    const live = await getMediaPlaylist(job.historicalLiveUrl, hdr)
+    const mapped = mapHistoricalSnapshot(media, live)
+    log('historical snapshot mapped:', mapped.segments.length, 'segments')
+    return mapped
+  }
+
   try {
-    let media = await getMediaPlaylist(m3u8, hdr)
+    let media = await loadJobPlaylist(m3u8)
+
+    // Automatic historical companion v2
+    if (job.role !== 'backup') {
+      startHistoricalCompanion(job, m3u8, hdr, log).catch(() => {
+        log('historical recovery failed; live capture remains separate')
+      })
+    }
     log(`playlist ok · segments=${media.segments.length} endlist=${media.hasEndList} target=${media.target}s`)
     if (media.initUri) {
       try {
@@ -423,7 +797,12 @@ async function runJob(job, m3u8) {
     // always named "dynamic_playlist"). Enables the Stop button for live.
     job.kind = isLive ? 'live' : 'replay'
     job.gaps = 0
-    job.recordedSecs = 0 // real audio duration captured so far (from EXTINF timings)
+    job.recordedSecs = 0 // Duration of successfully written audio only.
+    job.capturedSegments = 0
+    job.capturedBytes = 0
+    job.gapSeconds = 0
+    job.captureWarning = null
+    job.captureStopReason = isLive ? null : 'playlist_end'
     // For a VOD/replay the total length is known up front; expose it so the UI
     // can say "3:12 of 41:00" and show a true percentage.
     if (!isLive) job.totalSecs = media.durations.reduce((a, b) => a + b, 0)
@@ -437,23 +816,21 @@ async function runJob(job, m3u8) {
     if (media.segments.length > 0) {
       try {
         const first = await fetchBufRetry(media.segments[0], 4, hdr)
+        if (!first || first.length === 0) {
+          throw new Error('No audio data returned for segment.')
+        }
+        await writeBuf(first)
         seen.add(media.segments[0])
         job.total += 1
         job.done += 1
+        job.capturedSegments += 1
+        job.capturedBytes += first.length
         job.recordedSecs += media.durations[0] || 0
-        await writeBuf(first)
         log(`first chunk ok · ${first.length} bytes`)
       } catch (e) {
-        const why = String(e?.message || e)
+        const why = safeCaptureError(e)
         log(`first chunk failed · ${why}`)
-        if (!isLive) {
-          throw new Error(
-            `Could not download the audio chunks (first chunk: ${why}). ` +
-              (job.cookie
-                ? 'Your connected X account session may be expired — reconnect it in Settings.'
-                : 'This audio is login-restricted. Connect an X account in Settings and record with the Connected account access mode.')
-          )
-        }
+        if (!isLive) throw new Error(why)
         // live: leave segment[0] un-seen so the normal loop retries it.
       }
     }
@@ -475,20 +852,28 @@ async function runJob(job, m3u8) {
           const u = list[i]
           try {
             const b = await fetchBufRetry(u, 3, hdr)
+            if (!b || b.length === 0) {
+              throw new Error('No audio data returned for segment.')
+            }
             job.done += 1
-            job.recordedSecs += durs[i] || 0
-            return b
+            return { buffer: b, seconds: durs[i] || 0 }
           } catch (e) {
             job.gaps += 1
             job.done += 1
-            job.recordedSecs += durs[i] || 0 // gap still spans that slice of time
-            job.lastSegErr = String(e?.message || e)
+            job.gapSeconds += durs[i] || 0
+            job.lastSegErr = safeCaptureError(e)
             return null
           }
         },
         6
       )
-      for (const b of bufs) if (b) await writeBuf(b)
+      for (const item of bufs) {
+        if (!item) continue
+        await writeBuf(item.buffer)
+        job.capturedSegments += 1
+        job.capturedBytes += item.buffer.length
+        job.recordedSecs += item.seconds
+      }
     }
 
     await downloadNew(media.segments, media.durations)
@@ -497,38 +882,64 @@ async function runJob(job, m3u8) {
     let consecFails = 0
     let lastNewAt = Date.now()
     while (isLive && job.state === 'downloading') {
-      if (Date.now() - job.startedAt > MAX_LIVE_MS) break // safety cap
+      if (Date.now() - job.startedAt > MAX_LIVE_MS) {
+        job.captureStopReason = 'time_limit'
+        break
+      }
       // Fast fail: if a "live" stream produced NO audio at all within 90s, it's
       // almost certainly login/geo-restricted or not really streaming — don't
       // spin forever, surface a clear error.
-      if (job.done === 0 && Date.now() - job.startedAt > 90 * 1000) {
+      if (job.capturedSegments === 0 && Date.now() - job.startedAt > 90 * 1000) {
+        job.captureStopReason = 'no_audio'
         throw new Error(
-          'Connected to the live stream but received no audio in 90s — it is likely login-restricted. Connect an X account in Settings and record with the Connected account access mode.'
+          'No audio was received within 90 seconds. The cause is not yet established.'
         )
       }
       await sleep(Math.max(2, media.target) * 1000)
-      if (job.state !== 'downloading') break
+      if (job.state !== 'downloading') {
+        job.captureStopReason = 'user_stop'
+        break
+      }
       let next
       try {
-        next = await getMediaPlaylist(media.url, hdr)
+        next = await loadJobPlaylist(media.url)
         consecFails = 0
       } catch {
         // playlist temporarily unreachable — retry, but give up after a while
         consecFails += 1
-        if (consecFails >= MAX_CONSEC_FAILS) break
+        if (consecFails >= MAX_CONSEC_FAILS) {
+          job.captureStopReason = 'playlist_unavailable'
+          break
+        }
         continue
       }
       media = next
-      const before = job.done
+      const before = job.capturedSegments
       await downloadNew(media.segments, media.durations)
-      if (job.done > before) lastNewAt = Date.now()
+      if (job.capturedSegments > before) lastNewAt = Date.now()
       // If the Space ended, X marks the playlist ENDLIST.
-      if (media.hasEndList) break
+      if (media.hasEndList) {
+        job.captureStopReason = 'playlist_end'
+        break
+      }
       // Or if no new audio has appeared for a long stretch, assume it ended.
-      if (Date.now() - lastNewAt > 5 * 60 * 1000) break
+      if (Date.now() - lastNewAt > 5 * 60 * 1000) {
+        job.captureStopReason = 'no_new_audio'
+        break
+      }
+    }
+    if (!job.captureStopReason) {
+      job.captureStopReason = job.state === 'stopped'
+        ? 'user_stop' : 'capture_error'
+    }
+    if (['time_limit', 'playlist_unavailable', 'no_new_audio']
+        .includes(job.captureStopReason)) {
+      job.captureWarning = 'capture_end_unconfirmed'
+    } else if (job.gaps > 0) {
+      job.captureWarning = 'missing_audio_segments'
     }
     await new Promise((res) => ws.end(res))
-    if (job.done === 0) throw new Error('No audio segments were downloaded.')
+    if (job.capturedSegments === 0) throw new Error('No audio segments were downloaded.')
 
     job.state = 'processing'
     const outFile = path.join(DL_DIR, `${job.id}.m4a`)
@@ -540,6 +951,7 @@ async function runJob(job, m3u8) {
         fs.unlinkSync(rawFile)
       } catch {}
     } else {
+      job.captureWarning = 'processing_failed'
       job.file = rawFile
       job.name = job.baseName + '.aac'
     }
@@ -548,11 +960,16 @@ async function runJob(job, m3u8) {
     await archiveInsert(job)
     onJobTerminal(job)
   } catch (e) {
+    if (job.captureStopReason !== 'no_audio' && job.state !== 'processing') {
+      job.captureStopReason = 'capture_error'
+    }
     try {
       ws.end()
     } catch {}
     // If we captured anything usable before erroring, still keep it.
-    if (job.done > 0 && fs.existsSync(rawFile) && fs.statSync(rawFile).size > 0) {
+    if (job.capturedSegments > 0 && fs.existsSync(rawFile) && fs.statSync(rawFile).size > 0) {
+      job.captureWarning = job.state === 'processing'
+        ? 'processing_failed' : 'capture_interrupted'
       job.file = rawFile
       job.name = job.baseName + '.aac'
       job.sizeBytes = fs.statSync(rawFile).size
@@ -561,7 +978,7 @@ async function runJob(job, m3u8) {
       onJobTerminal(job)
     } else {
       job.state = 'error'
-      job.error = String(e?.message || e)
+      job.error = safeCaptureError(e)
       log(`ERROR · ${job.error}`)
       onJobTerminal(job)
     }
@@ -577,41 +994,9 @@ async function runJob(job, m3u8) {
 //   accessMode 'public'            → no credentials (guest access)
 //   accessMode 'connected_account' → decrypt the named connection's session
 // Returns { accessMode, cookie, csrf, connectionId, handle, error }.
-async function credsForRequest(body = {}) {
-  const accessMode = body.accessMode === 'connected_account' ? 'connected_account' : 'public'
-  if (accessMode !== 'connected_account') {
-    return { accessMode: 'public', cookie: null, csrf: null, connectionId: null }
-  }
-  const connId = body.xConnectionId
-  if (!connId) {
-    return { accessMode: 'public', cookie: null, csrf: null, connectionId: null, error: 'no-connection' }
-  }
-  let conn
-  try {
-    const { rows } = await dbQuery(
-      'SELECT id, x_handle, status, encrypted_credentials, credential_key_version FROM x_connections WHERE id=$1',
-      [connId]
-    )
-    conn = rows[0]
-  } catch {
-    return { accessMode: 'public', cookie: null, csrf: null, connectionId: null, error: 'lookup-failed' }
-  }
-  if (!conn || !conn.encrypted_credentials) {
-    return { accessMode: 'public', cookie: null, csrf: null, connectionId: null, error: 'connection-unavailable' }
-  }
-  try {
-    const creds = JSON.parse(await decryptSecret(conn.encrypted_credentials, conn.credential_key_version))
-    return {
-      accessMode: 'connected_account',
-      cookie: creds.cookie || null,
-      csrf: creds.csrf || null,
-      connectionId: conn.id,
-      handle: conn.x_handle || null,
-      status: conn.status,
-    }
-  } catch {
-    return { accessMode: 'public', cookie: null, csrf: null, connectionId: null, error: 'decrypt-failed' }
-  }
+async function credsForRequest(body = {}, req) {
+  const { sessionForRequest } = require('../lib/x-session-for-request')
+  return sessionForRequest(body, req, { dbQuery, decryptSecret })
 }
 
 async function markConnectionUsed(id) {
@@ -623,18 +1008,31 @@ async function markConnectionUsed(id) {
 
 // Shared resolution used by both /resolve and the auto-capture monitor.
 async function resolveSpaceCore({ input, cookie, csrf }) {
+  const { resolutionFailure } = require('../lib/x-resolution-failure')
   const spaceId = parseSpaceId(input)
-  if (!spaceId) return { ok: false, reason: 'Could not read a Space ID from that link.' }
-  const guestToken = await getGuestToken()
-  if (!guestToken) return { ok: false, reason: 'Could not obtain a guest token from X.' }
-  const space = await audioSpaceById(spaceId, guestToken, cookie, csrf)
-  if (!space || space.__empty) {
+  if (!spaceId) {
     return {
       ok: false,
-      reason:
-        "X returned no data for this Space. That usually means the ID is wrong or the Space no longer exists. Double-check the link. If you're sure it's valid and currently live/recorded, try again in a moment, or connect an X account in Settings and use the Connected account access mode.",
+      code: 'invalid_space_input',
+      canTryConnectedAccount: false,
+      reason: 'Could not read a Space ID from that link.',
     }
   }
+
+  const guestDiagnostics = []
+  const guestToken = cookie ? null : await getGuestToken(guestDiagnostics)
+  if (!cookie && !guestToken) {
+    return resolutionFailure('guest', guestDiagnostics)
+  }
+
+  const lookupDiagnostics = []
+  const space = await audioSpaceById(
+    spaceId, guestToken, cookie, csrf, lookupDiagnostics
+  )
+  if (!space || space.__empty) {
+    return resolutionFailure('lookup', lookupDiagnostics)
+  }
+
   const meta = space.metadata || {}
   const title = meta.title || 'X Space'
   const state = meta.state
@@ -642,29 +1040,30 @@ async function resolveSpaceCore({ input, cookie, csrf }) {
   if (!meta.media_key) {
     return {
       ok: false,
-      title,
-      state,
-      live,
+      code: 'space_audio_not_exposed',
+      canTryConnectedAccount: false,
+      title, state, live,
       reason: live
-        ? "This Space is live but X hasn't exposed its audio stream yet — retrying…"
-        : 'This Space has no downloadable recording (the host did not record it, so no audio was ever stored).',
+        ? 'The Space is live, but X has not exposed an audio media key. Try again shortly.'
+        : 'X did not expose an audio media key. This does not establish whether a replay exists or will become available.',
     }
   }
-  const m3u8 = await streamStatus(meta.media_key, guestToken, cookie, csrf)
+
+  const streamDiagnostics = []
+  const m3u8 = await streamStatus(
+    meta.media_key, guestToken, cookie, csrf, streamDiagnostics
+  )
   if (!m3u8) {
     return {
-      ok: false,
-      title,
-      state,
-      live,
-      reason: 'Found the Space but not its audio stream — connect an X account in Settings and use the Connected account access mode.',
+      ...resolutionFailure('stream', streamDiagnostics),
+      title, state, live,
     }
   }
   return { ok: true, m3u8, title, state, live }
 }
 
 // Create + start a download job. Returns the job (or null if at capacity).
-function createJob({ m3u8, name, enhance, title, source, input, cookie, csrf, groupId, role, accessMode, xConnectionId }) {
+function createJob({ m3u8, name, enhance, title, source, input, cookie, csrf, groupId, role, accessMode, xConnectionId, historicalLiveUrl }) {
   if (activeCount() >= MAX_ACTIVE) return null
   const id = Math.random().toString(36).slice(2, 10)
   const baseName = (name && String(name).replace(/[^\w.-]+/g, '_').slice(0, 80)) || `x_space_${id}`
@@ -682,6 +1081,7 @@ function createJob({ m3u8, name, enhance, title, source, input, cookie, csrf, gr
     name: baseName + '.m4a',
     title: title || null,
     m3u8,
+    historicalLiveUrl: historicalLiveUrl || null,
     enhance: enhance !== false, // clarity on by default
     sourceKind: source || 'stream',
     startedAt: Date.now(),
@@ -727,9 +1127,14 @@ async function runBackup(liveJob) {
           cookie: liveJob.cookie,
           csrf: liveJob.csrf,
         })
-        if (r.ok && r.m3u8) {
-          m3u8 = r.m3u8
-          if (r.title) title = r.title
+        if (r.ok && r.m3u8 && !r.live) {
+          const hdr = liveJob.cookie ? { Cookie: liveJob.cookie } : {}
+          const replay = await getMediaPlaylist(r.m3u8, hdr)
+          if (replay.hasEndList && replay.segments.length) {
+            await fetchBufRetry(replay.segments[0], 3, hdr)
+            m3u8 = replay.url
+            if (r.title) title = r.title
+          }
         }
       } catch {}
       if (!m3u8) await sleep(15000)
@@ -773,10 +1178,25 @@ async function runBackup(liveJob) {
 // complete one. The LIVE job id stays canonical (the UI is polling it), so if
 // the replay wins we move its file onto the live id and drop the backup record.
 async function reconcileGroup(backupJob) {
+  // Preserve both sources until overlap-aware merge is implemented.
+  console.log('[space] reconciliation preservation guard; keeping source:',
+    backupJob.id, 'group:', backupJob.groupId)
+  return
+
   const live = [...jobs.values()].find(
     (j) => j.groupId === backupJob.groupId && j.role === 'live'
   )
   if (!live) return
+  if (!['ready', 'error'].includes(live.state)) {
+    console.log('[space] historical promotion deferred; live active:', live.id)
+    return
+  }
+  if (backupJob.state !== 'ready') return
+  if ((backupJob.gaps || 0) > 0) {
+    console.log('[space] backup retained separately because it has gaps:',
+      backupJob.id)
+    return
+  }
   const liveScore = live.state === 'ready' ? live.recordedSecs || 0 : -1
   const backupScore = backupJob.state === 'ready' ? backupJob.recordedSecs || 0 : -1
 
@@ -790,7 +1210,10 @@ async function reconcileGroup(backupJob) {
           fs.unlinkSync(live.file)
         } catch {}
       }
-      if (backupJob.file && fs.existsSync(backupJob.file)) fs.renameSync(backupJob.file, newPath)
+      if (!backupJob.file || !fs.existsSync(backupJob.file)) {
+        throw new Error('Backup file missing; refusing promotion')
+      }
+      fs.renameSync(backupJob.file, newPath)
       live.file = newPath
       live.recordedSecs = backupJob.recordedSecs
       live.totalSecs = backupJob.totalSecs
@@ -799,7 +1222,11 @@ async function reconcileGroup(backupJob) {
       live.kind = 'replay'
       live.state = 'ready'
       await archiveInsert(live)
-    } catch {}
+    } catch {
+      console.error('[space] backup promotion failed; retaining backup record:',
+        backupJob.id)
+      return
+    }
     live.backup = 'kept-replay'
   } else {
     if (backupJob.file && fs.existsSync(backupJob.file)) {
@@ -816,14 +1243,56 @@ async function reconcileGroup(backupJob) {
   jobs.delete(backupJob.id)
 }
 
+// Backfill lifecycle guard v5
+const reconciliationQueues = new Map()
+
+function queueReconciliation(backup) {
+  const key = backup.groupId
+  const previous = reconciliationQueues.get(key) || Promise.resolve()
+  const next = previous
+    .then(() => {
+      if (jobs.get(backup.id) === backup) return reconcileGroup(backup)
+    })
+    .catch(() => {
+      console.error('[space] reconciliation failed; backup retained:', backup.id)
+    })
+  reconciliationQueues.set(key, next)
+  next.then(() => {
+    if (reconciliationQueues.get(key) === next)
+      reconciliationQueues.delete(key)
+  })
+}
+
 function onJobTerminal(job) {
-  if (job.role === 'backup') reconcileGroup(job)
-  else maybeStartBackup(job)
+  // Deleted captures may finalize, but must not launch new backup work.
+  if (job.deletionRequested) return
+
+  if (job.role === 'backup') {
+    queueReconciliation(job)
+    return
+  }
+  for (const candidate of jobs.values()) {
+    if (candidate.groupId === job.groupId &&
+        candidate.role === 'backup' &&
+        candidate.state === 'ready') {
+      queueReconciliation(candidate)
+    }
+  }
+  maybeStartBackup(job)
 }
 
 router.post('/resolve', async (req, res) => {
   try {
-    const creds = await credsForRequest(req.body || {})
+    const creds = await credsForRequest(req.body || {}, req)
+  if (creds.error) {
+    return res.status(creds.httpStatus || 403).json({
+      ok: false,
+      code: creds.error,
+      error: creds.reason,
+      reason: creds.reason,
+      accessMode: creds.accessMode,
+    })
+  }
     const r = await resolveSpaceCore({ input: (req.body || {}).input, cookie: creds.cookie, csrf: creds.csrf })
     if (r.ok && creds.connectionId) markConnectionUsed(creds.connectionId)
     return res.json({ ...r, accessMode: creds.accessMode, xConnectionId: creds.connectionId || null })
@@ -836,7 +1305,16 @@ router.post('/resolve', async (req, res) => {
 // (guest token? space lookup? stream URL?) instead of a single opaque message.
 router.post('/diagnose', async (req, res) => {
   const { input } = req.body || {}
-  const creds = await credsForRequest(req.body || {})
+  const creds = await credsForRequest(req.body || {}, req)
+  if (creds.error) {
+    return res.status(creds.httpStatus || 403).json({
+      ok: false,
+      code: creds.error,
+      error: creds.reason,
+      reason: creds.reason,
+      accessMode: creds.accessMode,
+    })
+  }
   const cookie = creds.cookie
   const csrf = creds.csrf
   const steps = []
@@ -941,7 +1419,16 @@ router.post('/monitor', async (req, res) => {
   if (!parseSpaceId(input)) {
     return res.status(400).json({ error: 'A valid X Space link or ID is required.' })
   }
-  const creds = await credsForRequest(req.body || {})
+  const creds = await credsForRequest(req.body || {}, req)
+  if (creds.error) {
+    return res.status(creds.httpStatus || 403).json({
+      ok: false,
+      code: creds.error,
+      error: creds.reason,
+      reason: creds.reason,
+      accessMode: creds.accessMode,
+    })
+  }
   const cookie = creds.cookie
   const csrf = creds.csrf
   const accessMode = creds.accessMode
@@ -1045,7 +1532,16 @@ router.post('/download', async (req, res) => {
   if (!m3u8 || !/^https?:\/\//i.test(m3u8)) {
     return res.status(400).json({ error: 'A valid https stream URL (.m3u8) is required.' })
   }
-  const creds = await credsForRequest(req.body || {})
+  const creds = await credsForRequest(req.body || {}, req)
+  if (creds.error) {
+    return res.status(creds.httpStatus || 403).json({
+      ok: false,
+      code: creds.error,
+      error: creds.reason,
+      reason: creds.reason,
+      accessMode: creds.accessMode,
+    })
+  }
   const job = createJob({
     m3u8, name, enhance, title, source, input,
     cookie: creds.cookie, csrf: creds.csrf,
@@ -1076,6 +1572,13 @@ router.get('/status/:id', (req, res) => {
   res.json({
     id, state, done, total, gaps, sizeBytes, error, name, kind, enhance,
     recordedSecs: recordedSecs || 0,
+    capturedSegments: job.capturedSegments ?? null,
+    capturedBytes: job.capturedBytes ?? null,
+    gapSeconds: job.gapSeconds ?? null,
+    archiveStatus: job.archiveStatus || 'unknown',
+    archiveError: job.archiveError || null,
+    captureWarning: job.captureWarning || null,
+    captureStopReason: job.captureStopReason || null,
     totalSecs: totalSecs || 0,
     groupId, role, backup: backup || null,
     elapsedMs: Date.now() - startedAt,
@@ -1087,7 +1590,22 @@ router.get('/status/:id', (req, res) => {
 router.get('/archive', async (_req, res) => {
   try {
     const { rows } = await dbQuery(
-      'SELECT id, name, title, kind, source, size_bytes, duration_seconds, enhanced, access_mode, x_connection_id, created_at FROM recordings ORDER BY created_at DESC'
+      `SELECT id, name, title, kind, source, size_bytes,
+               duration_seconds, enhanced, access_mode, x_connection_id,
+               created_at, archived_at, expires_at,
+               'space' AS item_kind
+        FROM recordings
+        WHERE archived_at IS NOT NULL AND deleted_at IS NULL
+        UNION ALL
+        SELECT id, title AS name, title, 'clip' AS kind,
+               'clip' AS source, size_bytes, duration_seconds, enhanced,
+               NULL AS access_mode, NULL AS x_connection_id,
+               created_at, archived_at, expires_at,
+               'clip' AS item_kind
+        FROM clips
+        WHERE archived_at IS NOT NULL AND deleted_at IS NULL
+          AND status = 'completed'
+        ORDER BY created_at DESC`
     )
     const withExist = rows.map((r) => ({
       ...r,
@@ -1105,6 +1623,12 @@ router.get('/archive', async (_req, res) => {
 })
 
 router.delete('/archive/:id', async (req, res) => {
+  // Retention safety interlock v1: no immediate Space deletion.
+  return res.status(503).json({
+    ok: false,
+    error: 'Deletion is temporarily disabled while two-hour restore support is installed.'
+  })
+
   const id = req.params.id
   try {
     for (const ext of ['.m4a', '.aac', '.raw']) {
@@ -1195,7 +1719,7 @@ router.get('/file/:id', async (req, res) => {
   let name = job?.name
   if (!file) {
     // fall back to the persistent archive
-    for (const ext of ['.m4a', '.aac']) {
+    for (const ext of ['.m4a', '.aac', '.raw']) {
       const p = path.join(DL_DIR, `${id}${ext}`)
       if (fs.existsSync(p)) {
         file = p
@@ -1212,15 +1736,135 @@ router.get('/file/:id', async (req, res) => {
     }
   }
   if (!file || !fs.existsSync(file)) return res.status(404).json({ error: 'File not found' })
-  res.download(file, name)
+  // Inline recording playback v1
+  if (req.query.download === '1') {
+    return res.download(file, name)
+  }
+
+  const extension = path.extname(file).toLowerCase()
+  const displayExtension = path.extname(name || '').toLowerCase()
+  let contentType
+
+  if (extension === '.m4a' || extension === '.mp4') {
+    contentType = 'audio/mp4'
+  } else if (extension === '.aac' ||
+             extension === '.raw' && displayExtension === '.aac') {
+    contentType = 'audio/aac'
+  } else if (extension === '.mp3') {
+    contentType = 'audio/mpeg'
+  } else {
+    return res.download(file, name)
+  }
+
+  return res.sendFile(path.resolve(file), {
+    acceptRanges: true,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Disposition': 'inline',
+    },
+  })
 })
 
 // ---- Clip Creator ----------------------------------------------------------
 // Clips are derived cuts from a completed recording. The ORIGINAL is never
 // modified — each clip is a distinct file that references its parent recording.
 
+
+// Background clip queue v1
+// One render at a time. Queued rows survive backend restarts.
+let clipQueueBusy = false
+let clipQueueRecovered = false
+
+async function runClipQueue() {
+  if (clipQueueBusy ||
+      (typeof exportService !== 'undefined' && exportService.isRendering())) return
+  clipQueueBusy = true
+  let clip = null
+  let temporaryFile = null
+  try {
+    if (!clipQueueRecovered) {
+      // An interrupted render is not a completed file.
+      // Do not silently publish or automatically duplicate interrupted work.
+      await dbQuery(
+        "UPDATE clips SET status='failed' WHERE status='rendering'"
+      )
+      clipQueueRecovered = true
+    }
+
+    const { rows } = await dbQuery(
+      `SELECT * FROM clips
+       WHERE status='queued' AND deleted_at IS NULL
+       ORDER BY created_at ASC, id ASC LIMIT 1`
+    )
+    clip = rows[0]
+    if (!clip) return
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(clip.id)) {
+      throw new Error('Invalid queued clip ID')
+    }
+
+    const parent = await dbQuery(
+      'SELECT deleted_at FROM recordings WHERE id=$1',
+      [clip.parent_recording_id]
+    )
+    if (parent.rows[0]?.deleted_at) {
+      throw new Error('Source recording is pending deletion')
+    }
+
+    const source = recordingFile(clip.parent_recording_id)
+    if (!source) throw new Error('Source recording is unavailable')
+
+    await dbQuery(
+      "UPDATE clips SET status='rendering' WHERE id=$1 AND status='queued'",
+      [clip.id]
+    )
+
+    temporaryFile = path.join(DL_DIR, `${clip.id}.rendering.m4a`)
+    const output = path.join(DL_DIR, `${clip.id}.m4a`)
+    const ok = await extractClip(
+      source, temporaryFile,
+      Number(clip.start_seconds), Number(clip.end_seconds),
+      Boolean(clip.enhanced)
+    )
+    if (!ok) throw new Error('FFmpeg did not produce a valid clip')
+
+    // A file becomes publicly available only after rendering finishes.
+    fs.renameSync(temporaryFile, output)
+    temporaryFile = null
+    const size = fs.statSync(output).size
+    await dbQuery(
+      `UPDATE clips
+       SET status='completed', size_bytes=$1,
+           archived_at=COALESCE(archived_at, NOW()),
+           expires_at=NULL, retention_remaining_seconds=NULL
+       WHERE id=$2`,
+      [size, clip.id]
+    )
+    console.log('[clips] completed:', clip.id)
+  } catch (error) {
+    console.error('[clips] render failed:', clip?.id || '',
+      String(error?.message || error))
+    if (clip) {
+      try {
+        await dbQuery("UPDATE clips SET status='failed' WHERE id=$1", [clip.id])
+      } catch (updateError) {
+        console.error('[clips] status update failed:',
+          String(updateError?.message || updateError))
+      }
+    }
+  } finally {
+    if (temporaryFile) {
+      try { fs.unlinkSync(temporaryFile) } catch {}
+    }
+    clipQueueBusy = false
+  }
+}
+
+const clipQueueTimer = setInterval(() => { void runClipQueue() }, 1500)
+clipQueueTimer.unref()
+
+
 const MIN_CLIP_SECS = 1
-const MAX_CLIP_SECS = 4 * 3600
+// Clip length is bounded by the available source duration.
 
 // Get a recording's true duration: prefer the stored value, fall back to probing
 // the file (covers recordings made before duration tracking existed).
@@ -1260,11 +1904,14 @@ router.post('/recordings/:id/clips', async (req, res) => {
     return res.status(400).json({ error: 'Enter valid start and end timestamps.' })
   if (start >= end) return res.status(400).json({ error: 'The start time must be earlier than the end time.' })
   const dur = await recordingDuration(parentId)
-  if (dur && end > dur + 1)
+  if (!Number.isFinite(dur) || dur <= 0)
+    return res.status(409).json({ error: 'Source duration is not available yet. Try after the recording finishes.' })
+  if (end > dur + 1)
     return res.status(400).json({ error: `The end time is past the recording length (${Math.floor(dur)}s).` })
   const clipDur = end - start
+  if (clipDur > 900) return res.status(400).json({ error: 'Clips cannot exceed 15 minutes.' })
   if (clipDur < MIN_CLIP_SECS) return res.status(400).json({ error: `Clips must be at least ${MIN_CLIP_SECS}s long.` })
-  if (clipDur > MAX_CLIP_SECS) return res.status(400).json({ error: 'That clip is too long.' })
+
 
   const id = 'c' + Math.random().toString(36).slice(2, 10)
   const doEnhance = enhance !== false
@@ -1273,30 +1920,24 @@ router.post('/recordings/:id/clips', async (req, res) => {
   try {
     await dbQuery(
       `INSERT INTO clips (id, parent_recording_id, title, start_seconds, end_seconds, duration_seconds, status, format, size_bytes, enhanced, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'rendering','m4a',0,$7, NOW())`,
+       VALUES ($1,$2,$3,$4,$5,$6,'queued','m4a',0,$7, NOW())`,
       [id, parentId, clipTitle, start, end, clipDur, doEnhance]
     )
   } catch (e) {
     return res.status(500).json({ error: 'Could not start the clip: ' + String(e?.message || e) })
   }
 
-  const ok = await extractClip(srcFile, outFile, start, end, doEnhance)
-  if (!ok) {
-    try { await dbQuery("UPDATE clips SET status='failed' WHERE id=$1", [id]) } catch {}
-    return res.status(500).json({ error: 'Rendering the clip failed. Try a slightly different range.' })
-  }
-  const size = fs.statSync(outFile).size
-  try {
-    await dbQuery("UPDATE clips SET status='completed', size_bytes=$1 WHERE id=$2", [size, id])
-  } catch {}
-  res.json({ id, status: 'completed', size_bytes: size, duration_seconds: clipDur, title: clipTitle })
+  res.status(202).json({
+    id, status: 'queued', duration_seconds: clipDur, title: clipTitle
+  })
+  setImmediate(() => { void runClipQueue() })
 })
 
 // Clips for one recording (the recording's "Clips" tab).
 router.get('/recordings/:id/clips', async (req, res) => {
   try {
     const { rows } = await dbQuery(
-      'SELECT * FROM clips WHERE parent_recording_id = $1 ORDER BY created_at DESC',
+      'SELECT * FROM clips WHERE parent_recording_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC',
       [req.params.id]
     )
     res.json(rows.map((r) => ({ ...r, available: fs.existsSync(path.join(DL_DIR, `${r.id}.m4a`)) })))
@@ -1311,6 +1952,7 @@ router.get('/clips', async (_req, res) => {
     const { rows } = await dbQuery(
       `SELECT c.*, r.title AS parent_title, r.name AS parent_name
        FROM clips c LEFT JOIN recordings r ON r.id = c.parent_recording_id
+       WHERE c.deleted_at IS NULL
        ORDER BY c.created_at DESC`
     )
     res.json(rows.map((r) => ({ ...r, available: fs.existsSync(path.join(DL_DIR, `${r.id}.m4a`)) })))
@@ -1320,6 +1962,12 @@ router.get('/clips', async (_req, res) => {
 })
 
 router.delete('/clips/:id', async (req, res) => {
+  // Retention safety interlock v1: no immediate clip deletion.
+  return res.status(503).json({
+    ok: false,
+    error: 'Deletion is temporarily disabled while two-hour restore support is installed.'
+  })
+
   const id = req.params.id
   try {
     const p = path.join(DL_DIR, `${id}.m4a`)
@@ -1345,4 +1993,132 @@ router.get('/clip/:id/file', async (req, res) => {
   res.download(file, name)
 })
 
+
+// Retention workers dry-run integration v1
+const { createExpiryWorker } = require('../lib/retention-expiry')
+const { createPurgeWorker } = require('../lib/retention-purge')
+
+function captureWorkIsBusy() {
+  for (const job of jobs.values()) {
+    if (['downloading', 'stopped', 'processing'].includes(job.state)) {
+      return true
+    }
+  }
+  const row = retentionDb().prepare(
+    "SELECT COUNT(*) AS count FROM clips WHERE status IN ('queued', 'rendering')"
+  ).get()
+  return row.count > 0
+}
+
+function retentionWorkIsBusy() {
+  return captureWorkIsBusy() || exportService.hasWork()
+}
+
+function runRetentionDryRun() {
+  try {
+    if (retentionWorkIsBusy()) return
+
+    const options = {
+      db: retentionDb(),
+      archiveDir: DL_DIR,
+      isBusy: () => retentionWorkIsBusy(),
+      enabled: process.env.RECORDER_RETENTION_MUTATIONS === '1',
+    }
+
+    const results = [
+      ...createExpiryWorker(options).runOnce(),
+      ...createPurgeWorker(options).runOnce(),
+    ]
+
+    if (results.length) {
+      console.log('[retention] dry-run candidates:', JSON.stringify(results))
+    }
+  } catch (error) {
+    console.error(
+      '[retention] dry-run failed:',
+      String(error?.message || error)
+    )
+  }
+}
+
+const retentionDryRunTimer = setInterval(runRetentionDryRun, 60000)
+retentionDryRunTimer.unref()
+
+
+// Process collection API v1
+router.get('/process', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  try {
+    const db = retentionDb()
+    const active = []
+    const activeIds = new Set()
+
+    for (const job of jobs.values()) {
+      if (!['downloading', 'stopped', 'processing'].includes(job.state)) {
+        continue
+      }
+      const row = db.prepare(
+        'SELECT archived_at, deleted_at FROM recordings WHERE id = ?'
+      ).get(job.id)
+      if (job.deletionRequested || row?.deleted_at) continue
+
+      activeIds.add(job.id)
+      active.push({
+        id: job.id,
+        item_kind: 'space',
+        title: job.title || job.name || job.id,
+        state: job.state,
+        duration_seconds: job.recordedSecs || 0,
+        archived_at: row?.archived_at || null,
+        started_at_ms: job.startedAt || 0,
+      })
+    }
+
+    active.sort((a, b) => a.started_at_ms - b.started_at_ms)
+
+    const completed = db.prepare(
+      `SELECT id, title, name, state, duration_seconds, size_bytes,
+              created_at, archived_at, expires_at
+       FROM recordings
+       WHERE state = 'ready'
+         AND archived_at IS NULL
+         AND deleted_at IS NULL
+       ORDER BY created_at DESC`
+    ).all().filter(row => !activeIds.has(row.id)).map(row => ({
+      id: row.id,
+      item_kind: 'space',
+      title: row.title || row.name || row.id,
+      state: row.state,
+      duration_seconds: row.duration_seconds,
+      size_bytes: row.size_bytes,
+      created_at: row.created_at,
+      archived_at: row.archived_at,
+      expires_at: row.expires_at,
+    }))
+
+    return res.json({ ok: true, active, completed })
+  } catch (error) {
+    console.error('[process] listing failed:',
+      String(error?.message || error))
+    return res.status(503).json({
+      ok: false,
+      error: 'Could not load the process collection',
+    })
+  }
+})
+
+require('../lib/pending-recording-routes').attachPendingRecordingRoutes(
+  router, { getDb: require('../lib/db').getDb }
+)
+
+// Durable export queue integration v1
+const exportService = require('../lib/export-jobs').attachExportRoutes(router, {
+  getDb: retentionDb,
+  archiveDir: DL_DIR,
+  exportDir: path.join(DL_DIR, '..', 'exports'),
+  ffmpegPath,
+  isBusy: () => captureWorkIsBusy(),
+})
+
 module.exports = router
+
